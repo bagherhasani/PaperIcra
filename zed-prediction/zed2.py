@@ -118,6 +118,61 @@ def get_hip_heading_body18(keypoint_3d, velocity):
     return hip_heading
 
 
+def project_trajectory_on_image(image, future_trajectory,
+                                fx, fy, cx_cam, cy_cam,
+                                cam_pose, label="2s"):
+    """
+    Project EKF predicted trajectory (ground-plane arc) onto the camera image.
+
+    EKF coords: px = ZED z (forward), py = ZED x (lateral)
+    World floor point: (lateral, 0, forward)
+
+    Uses the camera pose from ZED positional tracking to transform
+    ground-plane 3D points into image pixels via perspective projection.
+    """
+    try:
+        rvec = np.array(cam_pose.get_rotation_vector(), dtype=np.float64)
+        tvec = np.array(cam_pose.get_translation().get(), dtype=np.float64)
+        R, _ = cv2.Rodrigues(rvec)  # R rotates camera→world; R.T is world→camera
+    except Exception:
+        return
+
+    img_h, img_w = image.shape[:2]
+    projected = []
+
+    for (fwd, lat) in future_trajectory:
+        p_world = np.array([lat, 0.0, fwd], dtype=np.float64)
+        p_cam = R.T @ (p_world - tvec)
+
+        if p_cam[2] < 0.1:   # behind or too close to camera
+            continue
+
+        u = int(fx * p_cam[0] / p_cam[2] + cx_cam)
+        v = int(fy * p_cam[1] / p_cam[2] + cy_cam)
+
+        if 0 <= u < img_w and 0 <= v < img_h:
+            projected.append((u, v))
+
+    if len(projected) < 2:
+        return
+
+    # Purple arc along predicted path
+    cv2.polylines(image,
+                  [np.array(projected, dtype=np.int32)],
+                  False, (255, 0, 255), 3)
+
+    # Dots spaced evenly along the arc
+    step = max(1, len(projected) // 8)
+    for pt in projected[::step]:
+        cv2.circle(image, pt, 5, (200, 0, 255), -1)
+
+    # Final predicted position — bright red circle + time label
+    cv2.circle(image, projected[-1], 10, (0, 0, 255), -1)
+    cv2.putText(image, label,
+                (projected[-1][0] + 12, projected[-1][1] + 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
+
+
 def draw_top_down_prediction(image, px, py, future_trajectory):
     """
     Draw EKF prediction on a top-down map.
@@ -242,6 +297,15 @@ def main():
         print("Camera Open : " + repr(err) + ". Exit program.")
         exit()
 
+    # Camera intrinsics for image projection
+    left_cam = zed.get_camera_information().camera_configuration.calibration_parameters.left_cam
+    fx_cam = left_cam.fx
+    fy_cam = left_cam.fy
+    cx_cam = left_cam.cx
+    cy_cam = left_cam.cy
+
+    cam_pose = sl.Pose()
+
     # Body tracking parameters
     body_params = sl.BodyTrackingParameters()
     body_params.detection_model = sl.BODY_TRACKING_MODEL.HUMAN_BODY_FAST
@@ -299,6 +363,8 @@ def main():
         if zed.grab() == sl.ERROR_CODE.SUCCESS:
 
             zed.retrieve_bodies(bodies, body_runtime_param)
+
+            tracking_state = zed.get_position(cam_pose, sl.REFERENCE_FRAME.WORLD)
 
             zed.retrieve_image(image_zed, sl.VIEW.LEFT)
             image = image_zed.get_data()
@@ -525,6 +591,19 @@ def main():
                             py,
                             future_trajectory
                         )
+
+                        # -----------------------------
+                        # Trajectory arc projected onto image
+                        # -----------------------------
+
+                        if tracking_state == sl.POSITIONAL_TRACKING_STATE.OK:
+                            project_trajectory_on_image(
+                                image,
+                                future_trajectory,
+                                fx_cam, fy_cam, cx_cam, cy_cam,
+                                cam_pose,
+                                label=f"{seconds_ahead:.0f}s"
+                            )
 
                         # -----------------------------
                         # Text UI
