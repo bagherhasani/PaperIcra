@@ -423,39 +423,41 @@ def main():
                         # -----------------------------
 
                         remaining_predictions = []
+                        logged_this_frame = False
 
                         for pred in prediction_buffer:
                             if current_timestamp >= pred["target_time"]:
+                                if not logged_this_frame:
+                                    actual_px_now = measured_px
+                                    actual_py_now = measured_py
 
-                                actual_px_now = measured_px
-                                actual_py_now = measured_py
+                                    error = np.sqrt(
+                                        (pred["pred_px"] - actual_px_now) ** 2 +
+                                        (pred["pred_py"] - actual_py_now) ** 2
+                                    )
 
-                                error = np.sqrt(
-                                    (pred["pred_px"] - actual_px_now) ** 2 +
-                                    (pred["pred_py"] - actual_py_now) ** 2
-                                )
+                                    prediction_errors.append(error)
 
-                                prediction_errors.append(error)
+                                    csv_file.write(
+                                        f"{current_timestamp},"
+                                        f"{actual_px_now},"
+                                        f"{actual_py_now},"
+                                        f"{pred['pred_px']},"
+                                        f"{pred['pred_py']},"
+                                        f"{error},"
+                                        f"{pred['speed']},"
+                                        f"{pred['heading']},"
+                                        f"{pred['heading_rate']}\n"
+                                    )
 
-                                csv_file.write(
-                                    f"{current_timestamp},"
-                                    f"{actual_px_now},"
-                                    f"{actual_py_now},"
-                                    f"{pred['pred_px']},"
-                                    f"{pred['pred_py']},"
-                                    f"{error},"
-                                    f"{pred['speed']},"
-                                    f"{pred['heading']},"
-                                    f"{pred['heading_rate']}\n"
-                                )
+                                    csv_file.flush()
 
-                                csv_file.flush()
+                                    ade = np.mean(prediction_errors)
 
-                                ade = np.mean(prediction_errors)
+                                    print(f"prediction error = {error:.3f} m")
+                                    print(f"ADE so far = {ade:.3f} m")
 
-                                print(f"1s prediction error = {error:.3f} m")
-                                print(f"ADE so far = {ade:.3f} m")
-
+                                    logged_this_frame = True
                             else:
                                 remaining_predictions.append(pred)
 

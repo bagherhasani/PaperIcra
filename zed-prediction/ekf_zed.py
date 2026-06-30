@@ -33,7 +33,7 @@ class Ekf:
             [0,   1,   0,   0,   0],
             [0,   0, 100,   0,   0],
             [0,   0,   0,  10,   0],
-            [0,   0,   0,   0, 100]
+            [0,   0,   0,   0,   5]
         ], dtype=float)
 
         # Define R: measurement noise
@@ -41,7 +41,7 @@ class Ekf:
         self.ekf.R = np.array([
             [0.1, 0,   0],
             [0,   0.1, 0],
-            [0,   0,   0.3]
+            [0,   0,   1.0]
         ], dtype=float)
 
         # Define Q: process noise
@@ -51,7 +51,7 @@ class Ekf:
             [0,    0.01, 0,   0,    0],
             [0,    0,    0.1, 0,    0],
             [0,    0,    0,   0.05, 0],
-            [0,    0,    0,   0,    0.1]
+            [0,    0,    0,   0,    0.01]
         ], dtype=float)
 
     def normalize_angle(self, angle):
@@ -196,6 +196,7 @@ class Ekf:
 
         # Keep heading angle clean
         self.ekf.x[3] = self.normalize_angle(self.ekf.x[3])
+        self.ekf.x[2] = max(self.ekf.x[2], 0.0)
 
         return self.ekf.x
 
@@ -220,6 +221,7 @@ class Ekf:
         )
 
         self.ekf.x[3] = self.normalize_angle(self.ekf.x[3])
+        self.ekf.x[2] = max(self.ekf.x[2], 0.0)
 
         return self.ekf.x
 
@@ -249,9 +251,10 @@ class Ekf:
 
         return px, py, speed, heading, heading_rate
 
-    def predictFuture(self, seconds_ahead):
+    def predictFuture(self, seconds_ahead, steps=20):
         """
         Predict one future point without changing the EKF state.
+        Uses iterative CTRV integration to correctly handle turning motion.
         """
 
         px = self.ekf.x[0]
@@ -260,13 +263,15 @@ class Ekf:
         heading = self.ekf.x[3]
         heading_rate = self.ekf.x[4]
 
-        future_heading = heading + heading_rate * seconds_ahead
-        future_heading = self.normalize_angle(future_heading)
+        dt_step = seconds_ahead / steps
 
-        future_px = px + speed * np.cos(future_heading) * seconds_ahead
-        future_py = py + speed * np.sin(future_heading) * seconds_ahead
+        for _ in range(steps):
+            heading = heading + heading_rate * dt_step
+            heading = self.normalize_angle(heading)
+            px = px + speed * np.cos(heading) * dt_step
+            py = py + speed * np.sin(heading) * dt_step
 
-        return future_px, future_py
+        return px, py
 
     def predictFutureTrajectory(self, seconds_ahead, steps=20):
         """
