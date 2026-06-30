@@ -68,65 +68,83 @@ class Ekf:
 
     def motion_model(self, x):
         """
-        Nonlinear motion model.
+        Nonlinear motion model — closed-form CTRV (standard).
 
         state = [px, py, speed, heading, heading_rate]
+
+        When heading_rate is non-negligible, the exact arc integral is:
+            px_new = px + (v/omega) * ( sin(heading + omega*dt) - sin(heading) )
+            py_new = py + (v/omega) * (-cos(heading + omega*dt) + cos(heading) )
+        When heading_rate ~ 0, fall back to straight-line motion to avoid division by zero.
         """
 
-        px = x[0]
-        py = x[1]
-        speed = x[2]
-        heading = x[3]
+        px           = x[0]
+        py           = x[1]
+        speed        = x[2]
+        heading      = x[3]
         heading_rate = x[4]
 
-        # heading new
-        heading_new = heading + heading_rate * self.dt
-        heading_new = self.normalize_angle(heading_new)
+        heading_new = self.normalize_angle(heading + heading_rate * self.dt)
 
-        # position update
-        px_new = px + speed * np.cos(heading_new) * self.dt
-        py_new = py + speed * np.sin(heading_new) * self.dt
-
-        # assume speed and heading_rate stay the same during tiny dt
-        speed_new = speed
-        heading_rate_new = heading_rate
+        if abs(heading_rate) > 1e-5:
+            px_new = px + (speed / heading_rate) * ( np.sin(heading_new) - np.sin(heading))
+            py_new = py + (speed / heading_rate) * (-np.cos(heading_new) + np.cos(heading))
+        else:
+            px_new = px + speed * np.cos(heading) * self.dt
+            py_new = py + speed * np.sin(heading) * self.dt
 
         return np.array([
             px_new,
             py_new,
-            speed_new,
+            speed,
             heading_new,
-            heading_rate_new
+            heading_rate
         ], dtype=float)
 
     def F_jacobian(self, x):
         """
-        Jacobian of the nonlinear motion model.
+        Jacobian of the closed-form CTRV motion model.
 
-        This replaces the F matrix from normal KF.
+        Matches the motion_model above exactly.
+        When heading_rate ~ 0, uses the straight-line Jacobian.
         """
 
-        speed = x[2]
-        heading = x[3]
+        speed        = x[2]
+        heading      = x[3]
         heading_rate = x[4]
 
-        heading_new = heading + heading_rate * self.dt
-        heading_new = self.normalize_angle(heading_new)
+        heading_new = self.normalize_angle(heading + heading_rate * self.dt)
+
+        if abs(heading_rate) > 1e-5:
+            w  = heading_rate
+            dt = self.dt
+
+            # Exact partial derivatives of the closed-form arc integral
+            d_px_d_v     =  (np.sin(heading_new) - np.sin(heading)) / w
+            d_px_d_psi   =  (speed / w) * ( np.cos(heading_new) - np.cos(heading))
+            d_px_d_omega = -(speed / w**2) * (np.sin(heading_new) - np.sin(heading)) \
+                           + (speed / w) * np.cos(heading_new) * dt
+
+            d_py_d_v     =  (-np.cos(heading_new) + np.cos(heading)) / w
+            d_py_d_psi   =  (speed / w) * ( np.sin(heading_new) - np.sin(heading))
+            d_py_d_omega =  (speed / w**2) * (np.cos(heading_new) - np.cos(heading)) \
+                           + (speed / w) * np.sin(heading_new) * dt
+        else:
+            dt = self.dt
+            d_px_d_v     =  np.cos(heading) * dt
+            d_px_d_psi   = -speed * np.sin(heading) * dt
+            d_px_d_omega =  0.0
+
+            d_py_d_v     =  np.sin(heading) * dt
+            d_py_d_psi   =  speed * np.cos(heading) * dt
+            d_py_d_omega =  0.0
 
         F = np.array([
-            [1, 0, np.cos(heading_new) * self.dt,
-             -speed * np.sin(heading_new) * self.dt,
-             -speed * np.sin(heading_new) * self.dt * self.dt],
-
-            [0, 1, np.sin(heading_new) * self.dt,
-             speed * np.cos(heading_new) * self.dt,
-             speed * np.cos(heading_new) * self.dt * self.dt],
-
-            [0, 0, 1, 0, 0],
-
-            [0, 0, 0, 1, self.dt],
-
-            [0, 0, 0, 0, 1]
+            [1, 0, d_px_d_v,  d_px_d_psi,  d_px_d_omega],
+            [0, 1, d_py_d_v,  d_py_d_psi,  d_py_d_omega],
+            [0, 0, 1,         0,            0           ],
+            [0, 0, 0,         1,            self.dt     ],
+            [0, 0, 0,         0,            1           ]
         ], dtype=float)
 
         return F
