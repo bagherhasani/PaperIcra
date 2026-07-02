@@ -8,6 +8,9 @@ import pyzed.sl as sl
 import cv2
 import numpy as np
 from ekf_zed import Ekf
+from test_config import TEST_NAME
+
+LOG_CSV = f"ekf_prediction_log_{TEST_NAME}.csv"
 
 
 # ============================================================
@@ -350,7 +353,8 @@ def main():
     prediction_buffer = []
     prediction_errors = []
 
-    csv_file = open("ekf_prediction_log.csv", "w")
+    log_csv = LOG_CSV
+    csv_file = open(log_csv, "w")
     csv_file.write(
         "time,actual_px,actual_py,pred_px_1s,pred_py_1s,error_1s,speed,heading,heading_rate\n"
     )
@@ -423,7 +427,7 @@ def main():
 
                     current_timestamp = zed.get_timestamp(
                         sl.TIME_REFERENCE.IMAGE
-                    ).get_seconds()
+                    ).get_milliseconds() / 1000.0
 
                     if previous_timestamp is None:
                         dt = 0.033
@@ -432,8 +436,7 @@ def main():
 
                     previous_timestamp = current_timestamp
 
-                    # Safety for weird dt
-                    if dt <= 0 or dt > 1.0:
+                    if dt <= 0 or dt > 0.5:
                         dt = 0.033
 
                     # Only run EKF if heading is available
