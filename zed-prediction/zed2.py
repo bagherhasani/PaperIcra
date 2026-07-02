@@ -8,7 +8,7 @@ import pyzed.sl as sl
 import cv2
 import numpy as np
 from ekf_zed import Ekf
-from test_config import TEST_NAME
+from test_config import TEST_NAME, MOTION_MODEL, STEERING_GAIN_B
 
 LOG_CSV = f"ekf_prediction_log_{TEST_NAME}.csv"
 
@@ -457,7 +457,9 @@ def main():
                                 initial_speed,
                                 measured_heading,
                                 0.0,
-                                dt
+                                dt,
+                                motion_model=MOTION_MODEL,
+                                steering_gain_b=STEERING_GAIN_B,
                             )
 
                         px, py, speed, heading, heading_rate = ekf.process_measurement(

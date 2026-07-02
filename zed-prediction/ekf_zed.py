@@ -4,7 +4,8 @@ import numpy as np
 
 class Ekf:
     def __init__(self, initial_px, initial_py, initial_speed,
-                 initial_heading, initial_heading_rate, dt=0.033):
+                 initial_heading, initial_heading_rate, dt=0.033,
+                 motion_model="ctrv", steering_gain_b=3.0):
 
         self.initial_px = initial_px
         self.initial_py = initial_py
@@ -12,6 +13,9 @@ class Ekf:
         self.initial_heading = initial_heading
         self.initial_heading_rate = initial_heading_rate
         self.dt = dt
+        self.motion_model_type = motion_model
+        self.steering_gain_b = steering_gain_b
+        self.hip_heading = initial_heading
 
         # Initialize EKF
         # state = [px, py, speed, heading, heading_rate]
@@ -66,6 +70,79 @@ class Ekf:
         """
         self.dt = dt
 
+    def hip_steering_dot(self, heading, hip_heading):
+        """
+        v_hat_perp · h_hat with v_hat_perp = left normal to velocity heading.
+
+        Equals sin(hip_heading - heading): positive when hip is left of velocity.
+        """
+        return np.sin(hip_heading - heading)
+
+    def motion_model_hip_steering(self, x):
+        """
+        Prof motion model:
+            theta_v^{k+1} = theta_v^k + b * (v_hat_perp · h_hat)
+
+        Position uses straight-line step with the updated heading.
+        State[4] stores the implied turn rate for logging/plotting.
+        """
+        px = x[0]
+        py = x[1]
+        speed = x[2]
+        heading = x[3]
+
+        hip = self.hip_heading
+        dt = self.dt
+        b = self.steering_gain_b
+
+        steer = b * self.hip_steering_dot(heading, hip) * dt
+        heading_new = self.normalize_angle(heading + steer)
+        heading_rate_new = steer / dt if dt > 0 else 0.0
+
+        px_new = px + speed * np.cos(heading_new) * dt
+        py_new = py + speed * np.sin(heading_new) * dt
+
+        return np.array([
+            px_new,
+            py_new,
+            speed,
+            heading_new,
+            heading_rate_new
+        ], dtype=float)
+
+    def F_jacobian_hip_steering(self, x):
+        """
+        Jacobian of the hip-steering motion model.
+        Hip heading is treated as constant during one predict step.
+        """
+        speed = x[2]
+        heading = x[3]
+        hip = self.hip_heading
+        dt = self.dt
+        b = self.steering_gain_b
+
+        d_heading_new_d_heading = 1.0 - b * dt * np.cos(hip - heading)
+        heading_new = self.normalize_angle(
+            heading + b * self.hip_steering_dot(heading, hip) * dt
+        )
+
+        d_px_d_v = np.cos(heading_new) * dt
+        d_px_d_psi = -speed * np.sin(heading_new) * dt * d_heading_new_d_heading
+        d_py_d_v = np.sin(heading_new) * dt
+        d_py_d_psi = speed * np.cos(heading_new) * dt * d_heading_new_d_heading
+
+        d_omega_d_psi = -b * np.cos(hip - heading)
+
+        F = np.array([
+            [1, 0, d_px_d_v, d_px_d_psi, 0],
+            [0, 1, d_py_d_v, d_py_d_psi, 0],
+            [0, 0, 1,        0,           0],
+            [0, 0, 0,        d_heading_new_d_heading, 0],
+            [0, 0, 0,        d_omega_d_psi,           0]
+        ], dtype=float)
+
+        return F
+
     def motion_model(self, x):
         """
         Nonlinear motion model — closed-form CTRV (standard).
@@ -77,6 +154,8 @@ class Ekf:
             py_new = py + (v/omega) * (-cos(heading + omega*dt) + cos(heading) )
         When heading_rate ~ 0, fall back to straight-line motion to avoid division by zero.
         """
+        if self.motion_model_type == "hip_steering":
+            return self.motion_model_hip_steering(x)
 
         px           = x[0]
         py           = x[1]
@@ -108,6 +187,8 @@ class Ekf:
         Matches the motion_model above exactly.
         When heading_rate ~ 0, uses the straight-line Jacobian.
         """
+        if self.motion_model_type == "hip_steering":
+            return self.F_jacobian_hip_steering(x)
 
         speed        = x[2]
         heading      = x[3]
@@ -252,6 +333,7 @@ class Ekf:
         """
 
         self.update_dt(dt)
+        self.hip_heading = measured_heading
 
         self.predict()
 
@@ -269,10 +351,28 @@ class Ekf:
 
         return px, py, speed, heading, heading_rate
 
+    def _integrate_future_step(self, px, py, speed, heading, heading_rate, dt_step):
+        """
+        One open-loop integration step for future trajectory prediction.
+        """
+        if self.motion_model_type == "hip_steering":
+            steer = (
+                self.steering_gain_b
+                * self.hip_steering_dot(heading, self.hip_heading)
+                * dt_step
+            )
+            heading = self.normalize_angle(heading + steer)
+        else:
+            heading = self.normalize_angle(heading + heading_rate * dt_step)
+
+        px = px + speed * np.cos(heading) * dt_step
+        py = py + speed * np.sin(heading) * dt_step
+
+        return px, py, heading
+
     def predictFuture(self, seconds_ahead, steps=20):
         """
         Predict one future point without changing the EKF state.
-        Uses iterative CTRV integration to correctly handle turning motion.
         """
 
         px = self.ekf.x[0]
@@ -284,10 +384,9 @@ class Ekf:
         dt_step = seconds_ahead / steps
 
         for _ in range(steps):
-            heading = heading + heading_rate * dt_step
-            heading = self.normalize_angle(heading)
-            px = px + speed * np.cos(heading) * dt_step
-            py = py + speed * np.sin(heading) * dt_step
+            px, py, heading = self._integrate_future_step(
+                px, py, speed, heading, heading_rate, dt_step
+            )
 
         return px, py
 
@@ -307,13 +406,10 @@ class Ekf:
 
         trajectory = []
 
-        for i in range(steps):
-            heading = heading + heading_rate * dt_future
-            heading = self.normalize_angle(heading)
-
-            px = px + speed * np.cos(heading) * dt_future
-            py = py + speed * np.sin(heading) * dt_future
-
+        for _ in range(steps):
+            px, py, heading = self._integrate_future_step(
+                px, py, speed, heading, heading_rate, dt_future
+            )
             trajectory.append((px, py))
 
         return trajectory
