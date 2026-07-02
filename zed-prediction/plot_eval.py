@@ -4,11 +4,13 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from test_config import TEST_NAME
 
-CSV_PATH = "ekf_prediction_log.csv"
+CSV_PATH = f"ekf_prediction_log_{TEST_NAME}.csv"
+DASHBOARD_PATH = f"ekf_eval_dashboard_{TEST_NAME}.png"
 
 if not os.path.exists(CSV_PATH):
-    print(f"CSV not found: {CSV_PATH}  — run zed2.py first.")
+    print(f"CSV not found: {CSV_PATH}  — run zed2.py with TEST_NAME='{TEST_NAME}' first.")
     sys.exit(1)
 
 df = pd.read_csv(CSV_PATH)
@@ -168,6 +170,6 @@ lines2, labels2 = ax5_twin.get_legend_handles_labels()
 ax5.legend(lines1 + lines2, labels1 + labels2, fontsize=9)
 ax5.grid(True)
 
-plt.savefig("ekf_eval_dashboard.png", dpi=150, bbox_inches="tight")
-print("Saved: ekf_eval_dashboard.png")
+plt.savefig(DASHBOARD_PATH, dpi=150, bbox_inches="tight")
+print(f"Saved: {DASHBOARD_PATH}")
 plt.show()
