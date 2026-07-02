@@ -108,6 +108,10 @@ def get_hip_heading_body18(keypoint_3d, velocity):
         if dot < 0:
             hip_forward_x = -hip_forward_x
             hip_forward_z = -hip_forward_z
+    else:
+        # Person standing still: front/back ambiguity cannot be resolved,
+        # the hip heading may be flipped 180 degrees. Do not trust it.
+        return None
 
     hip_lateral = hip_forward_x
     hip_forward = hip_forward_z
@@ -421,9 +425,10 @@ def main():
                         velocity
                     )
 
+                    # Millisecond precision: get_seconds() returns integer seconds
                     current_timestamp = zed.get_timestamp(
                         sl.TIME_REFERENCE.IMAGE
-                    ).get_seconds()
+                    ).get_milliseconds() / 1000.0
 
                     if previous_timestamp is None:
                         dt = 0.033
@@ -432,12 +437,14 @@ def main():
 
                     previous_timestamp = current_timestamp
 
-                    # Safety for weird dt
-                    if dt <= 0 or dt > 1.0:
+                    # Safety for weird dt (dropped frames, tracking gaps)
+                    if dt <= 0 or dt > 0.5:
                         dt = 0.033
 
-                    # Only run EKF if heading is available
-                    if measured_heading is not None:
+                    # Initialize EKF only when a trusted heading is available.
+                    # After that, run every frame: position-only update when
+                    # heading is None (person standing still).
+                    if ekf is None and measured_heading is not None:
 
                         zed_v_forward = velocity[2]
                         zed_v_lateral = velocity[0]
@@ -447,15 +454,16 @@ def main():
                             zed_v_lateral * zed_v_lateral
                         )
 
-                        if ekf is None:
-                            ekf = Ekf(
-                                measured_px,
-                                measured_py,
-                                initial_speed,
-                                measured_heading,
-                                0.0,
-                                dt
-                            )
+                        ekf = Ekf(
+                            measured_px,
+                            measured_py,
+                            initial_speed,
+                            measured_heading,
+                            0.0,
+                            dt
+                        )
+
+                    if ekf is not None:
 
                         px, py, speed, heading, heading_rate = ekf.process_measurement(
                             measured_px,

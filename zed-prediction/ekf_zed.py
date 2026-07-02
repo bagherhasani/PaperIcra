@@ -243,23 +243,65 @@ class Ekf:
 
         return self.ekf.x
 
+    def measurement_model_pos(self, x):
+        """
+        Position-only measurement model: [px, py].
+        """
+        return np.array([x[0], x[1]], dtype=float)
+
+    def measurement_jacobian_pos(self, x):
+        """
+        Position-only measurement Jacobian (2x5).
+        """
+        return np.array([
+            [1, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0]
+        ], dtype=float)
+
+    def update_position_only(self, measured_px, measured_py):
+        """
+        Update with ZED position only, skipping the heading measurement.
+
+        Used when the person is standing still: the hip front/back
+        ambiguity cannot be resolved without velocity, so the hip
+        heading may be flipped by 180 degrees and must not enter the filter.
+        """
+
+        z = np.array([measured_px, measured_py], dtype=float)
+
+        self.ekf.update(
+            z,
+            HJacobian=self.measurement_jacobian_pos,
+            Hx=self.measurement_model_pos,
+            R=self.ekf.R[:2, :2]
+        )
+
+        self.ekf.x[3] = self.normalize_angle(self.ekf.x[3])
+        self.ekf.x[2] = max(self.ekf.x[2], 0.0)
+
+        return self.ekf.x
+
     def process_measurement(self, measured_px, measured_py, measured_heading, dt):
         """
         Full EKF step:
         1. update dt
         2. predict
         3. update with ZED position + hip heading
+           (position only if measured_heading is None)
         """
 
         self.update_dt(dt)
 
         self.predict()
 
-        self.update(
-            measured_px,
-            measured_py,
-            measured_heading
-        )
+        if measured_heading is None:
+            self.update_position_only(measured_px, measured_py)
+        else:
+            self.update(
+                measured_px,
+                measured_py,
+                measured_heading
+            )
 
         px = float(self.ekf.x[0])
         py = float(self.ekf.x[1])
