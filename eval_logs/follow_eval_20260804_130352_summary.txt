@@ -1,0 +1,13 @@
+log: /home/user/ros2_ws/src/zed-detection/eval_logs/follow_eval_20260804_130352.csv
+rows: 596
+events: [('0.605', 'STATE:LOST->FOLLOWING'), ('2.949', 'SPACE_REGISTER'), ('3.015', 'STATE:FOLLOWING->REGISTERING'), ('5.158', 'STATE:REGISTERING->FOLLOWING'), ('9.075', 'SPACE_REGISTER'), ('9.153', 'STATE:FOLLOWING->REGISTERING'), ('11.316', 'STATE:REGISTERING->FOLLOWING'), ('16.052', 'STATE:FOLLOWING->LOST'), ('18.539', 'STATE:LOST->FOLLOWING'), ('32.503', 'STATE:FOLLOWING->LOST'), ('38.273', 'STATE:LOST->FOLLOWING')]
+state_counts: {'LOST': 120, 'FOLLOWING': 429, '': 2, 'REGISTERING': 45}
+follow_detect_rate: 1.000 (429/429)
+reid_while_following: mean=0.878 min=0.000 p10=0.803
+reid_best_while_lost: mean=0.844 max=0.900
+
+Solo pass criteria (rough):
+  - REGISTER ends with gallery_n >= 12
+  - follow_detect_rate > 0.90 while walking in view
+  - after leave/return: event REACQUIRED and FOLLOWING resumes
+  - reid_while_following mean usually > 0.65 for same clothes/view

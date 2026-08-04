@@ -6,4 +6,4 @@ __pycache__/
 zed-color-backup-claude.py
 shirt_snapshot.jpg
 *.onnx
-
+*.svo2

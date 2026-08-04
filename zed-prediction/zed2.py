@@ -7,8 +7,7 @@
 import pyzed.sl as sl
 import cv2
 import numpy as np
-from ekf_zed import Ekf
-from test_config import TEST_NAME, MOTION_MODEL, STEERING_GAIN_B
+from test_config import TEST_NAME, MOTION_MODEL, STEERING_GAIN_B, SVO_PATH, PROFIDEA2_ALPHA, PROFIDEA2_BETA, PROFIDEA3_K
 
 LOG_CSV = f"ekf_prediction_log_{TEST_NAME}.csv"
 
@@ -289,9 +288,17 @@ def main():
     # Camera initialization parameters
     init_params = sl.InitParameters()
     init_params.camera_resolution = sl.RESOLUTION.HD720
-    init_params.depth_mode = sl.DEPTH_MODE.NEURAL
     init_params.coordinate_units = sl.UNIT.METER
     init_params.sdk_verbose = 1
+
+    if SVO_PATH:
+        init_params.set_from_svo_file(SVO_PATH)
+        init_params.svo_real_time_mode = False
+        init_params.depth_mode = sl.DEPTH_MODE.ULTRA   # NEURAL segfaults on Jetson during SVO replay
+        print(f"[SVO] Replaying: {SVO_PATH}")
+    else:
+        init_params.depth_mode = sl.DEPTH_MODE.NEURAL
+        print("[LIVE] Using live camera")
 
     # Open camera
     err = zed.open(init_params)
@@ -338,6 +345,9 @@ def main():
         zed.close()
         exit()
 
+    # Import after ZED + body tracking are up — scipy/GPU collision on Jetson if imported earlier
+    from ekf_zed import Ekf
+
     bodies = sl.Bodies()
     image_zed = sl.Mat()
 
@@ -347,7 +357,7 @@ def main():
     # EKF variables
     ekf = None
     previous_timestamp = None
-    seconds_ahead = 2.0
+    seconds_ahead = 4.8
 
     # Evaluation variables
     prediction_buffer = []
@@ -364,7 +374,13 @@ def main():
     max_trajectory_len = 25
 
     while True:
-        if zed.grab() == sl.ERROR_CODE.SUCCESS:
+        grab_status = zed.grab()
+        if grab_status == sl.ERROR_CODE.END_OF_SVOFILE_REACHED:
+            print("[SVO] End of file reached. Exiting.")
+            break
+        if grab_status != sl.ERROR_CODE.SUCCESS:
+            break
+        if True:
 
             zed.retrieve_bodies(bodies, body_runtime_param)
 
@@ -460,6 +476,9 @@ def main():
                                 dt,
                                 motion_model=MOTION_MODEL,
                                 steering_gain_b=STEERING_GAIN_B,
+                                profidea2_alpha=PROFIDEA2_ALPHA,
+                                profidea2_beta=PROFIDEA2_BETA,
+                                profidea3_k=PROFIDEA3_K,
                             )
 
                         px, py, speed, heading, heading_rate = ekf.process_measurement(
