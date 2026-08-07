@@ -7,3 +7,8 @@ zed-color-backup-claude.py
 shirt_snapshot.jpg
 *.onnx
 *.svo2
+boxmot-venv/
+yolov8n.pt
+osnet_x0_25_msmt17.pt
+target_gallery.npz
+eval_logs/
