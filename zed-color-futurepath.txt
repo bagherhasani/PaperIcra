@@ -1,0 +1,7 @@
+Current state = insightface works with one person great test. 
+
+Future = 
+        - Two people test and result checking 
+        - Test short time re-id 
+        - Test long time re-id 
+        
