@@ -4,11 +4,14 @@ ZED person follower — register / gallery / track / reacquire.
 
 Demo flow:
   1. Stand in front of the camera (alone if possible).
-  2. Press SPACE — enrolls InsightFace face gallery + OSNet body gallery.
+  2. Press SPACE — type the person-of-interest name, Enter to confirm — then
+     strict InsightFace enroll (min 16 faces, FULL=32, det>=0.75) + body views.
   3. Robot follows using ZED body 3D + short-term ZED track ID.
   4. If ZED ID is lost: InsightFace face reacquire first (official 0.4 threshold);
      body OSNet only as alone/backup. If unsure → WAIT (never guess).
   5. R = clear registration.  M = mark eval event.  Q / ESC = quit + summary.
+  6. V = start/stop demo MP4 (saved under eval_logs/) — use this for professor videos
+     (windowed by default; F toggles fullscreen). Avoid OS screen recorders on Jetson.
   Logs: eval_logs/follow_eval_*.csv (+ *_summary.txt). Analyze with analyze_eval.py.
 
   Identity (InsightFace Evaluation Studio patterns):
@@ -301,7 +304,7 @@ class EvalLogger:
             )
         lines.append("")
         lines.append("Solo pass criteria (one person leave/return):")
-        lines.append("  - REGISTERED once; face_n >= 4 and gallery_n >= 12")
+        lines.append("  - REGISTERED once; face_n >= 16 (FULL=32) and gallery_n >= 12")
         lines.append("  - leave then return facing camera → REACQUIRED_FACE")
         lines.append("  - reacquire_via_face > 0; face_score_at_reacq mean >= 0.40")
         lines.append("  - lost_to_follow_sec usually < 8s (CPU face)")
@@ -458,11 +461,13 @@ class TargetGallery:
         self.path = path
         self.embeddings: list[np.ndarray] = []
         self.person_id = "target_001"
+        self.person_name = "target"
         self.height_m: float | None = None
 
     def clear(self):
         self.embeddings = []
         self.height_m = None
+        self.person_name = "target"
 
     def __len__(self):
         return len(self.embeddings)
@@ -505,6 +510,7 @@ class TargetGallery:
             self.path,
             embeddings=np.stack(self.embeddings, axis=0),
             person_id=np.array(self.person_id),
+            person_name=np.array(self.person_name),
             height_m=np.array(-1.0 if self.height_m is None else self.height_m),
         )
 
@@ -516,6 +522,8 @@ class TargetGallery:
             embs = data["embeddings"]
             self.embeddings = [embs[i].astype(np.float32) for i in range(len(embs))]
             self.person_id = str(data["person_id"])
+            if "person_name" in data:
+                self.person_name = str(data["person_name"])
             h = float(data["height_m"])
             self.height_m = None if h < 0 else h
             return len(self.embeddings) > 0
@@ -543,10 +551,12 @@ class FaceGallery:
         self.path = path
         self.embeddings: list[np.ndarray] = []
         self.person_id = _FACE_PERSON_ID
+        self.person_name = "target"
         self.threshold = float(_IF_FACE_THRESHOLD)  # InsightFace default 0.4
 
     def clear(self):
         self.embeddings = []
+        self.person_name = "target"
 
     def __len__(self):
         return len(self.embeddings)
@@ -556,7 +566,7 @@ class FaceGallery:
         return [
             {
                 "person_id": self.person_id,
-                "person_name": "target",
+                "person_name": self.person_name or "target",
                 "sample_id": i,
                 "embedding": emb,
             }
@@ -654,6 +664,7 @@ class FaceGallery:
             self.path,
             embeddings=np.stack(self.embeddings, axis=0),
             person_id=np.array(self.person_id),
+            person_name=np.array(self.person_name),
             threshold=np.array(self.threshold),
         )
 
@@ -665,6 +676,8 @@ class FaceGallery:
             embs = data["embeddings"]
             self.embeddings = [embs[i].astype(np.float32) for i in range(len(embs))]
             self.person_id = int(data["person_id"])
+            if "person_name" in data:
+                self.person_name = str(data["person_name"])
             if "threshold" in data:
                 self.threshold = float(data["threshold"])
             return len(self.embeddings) > 0
@@ -706,6 +719,7 @@ def _best_face_for_body(faces, body_bbox):
 
 class FollowState(Enum):
     IDLE = auto()
+    NAMING = auto()  # type person-of-interest name before enroll
     REGISTERING = auto()
     FOLLOWING = auto()
     LOST = auto()
@@ -724,11 +738,12 @@ class ZedFollower(Node):
         self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.actuation_enabled = True
 
-        # Follow control
+        # Follow control — keep ~1.2 m: farther → forward, closer → reverse
         self.target_distance = 1.2
-        self.min_distance = 0.5
-        self.max_lin_speed = 0.8
-        self.max_ang_speed = 0.9
+        self.distance_deadband_m = 0.08  # |d - 1.2| within this → stop (no chatter)
+        self.min_distance = 0.35  # below this: force full reverse (safety)
+        self.max_lin_speed = 0.5
+        self.max_ang_speed = 0.5
         self.k_lin = 0.7
         self.k_ang = 1.0
 
@@ -750,16 +765,24 @@ class ZedFollower(Node):
         self.state = FollowState.IDLE
         self.locked_id: int | None = None
         self.logical_target_id = 1
+        self.target_name = ""
+        self._name_buffer = ""
         self.last_target_position = None  # (x,y,z)
         self.enrolled_height_m: float | None = None
 
         self.gallery = TargetGallery(max_size=48, path=_GALLERY_PATH)
         self.face_gallery = FaceGallery(max_size=32, path=_FACE_GALLERY_PATH)
-        # ~5s gives time for a slow full turn (views > duration)
-        self.register_duration_sec = 5.0
+        # Strict face-first enroll: fill InsightFace gallery before FOLLOW is allowed.
+        # face_n max=32 = FULL LOAD. Cosine "score" is for reacquire, not enroll count.
+        self.register_duration_sec = 8.0
         self.register_start_t = 0.0
         self.register_min_embeds = 16
-        self.register_min_faces = 4  # InsightFace samples while facing camera
+        self.register_min_faces = 16  # hard gate — below this = register FAILED
+        self.register_ideal_faces = 32  # FULL LOAD (FaceGallery.max_size)
+        self.register_min_det_score = 0.75  # InsightFace Face.det_score; reject blurry/side
+        self._register_det_scores: list[float] = []
+        self._register_last_det = 0.0
+        self._register_last_self_sim = 0.0
 
         # Body OSNet gates (backup when face unavailable)
         self.reid_min_follow = 0.62
@@ -825,13 +848,23 @@ class ZedFollower(Node):
         body_ok = self.gallery.load()
         face_ok = self.face_gallery.load()
         if body_ok or face_ok:
+            name = (
+                self.face_gallery.person_name
+                if face_ok and self.face_gallery.person_name
+                else (self.gallery.person_name if body_ok else "target")
+            )
+            if name and name != "target":
+                self.target_name = name
             self.get_logger().info(
-                f"Loaded galleries body={len(self.gallery)} face={len(self.face_gallery)}. "
+                f"Loaded galleries body={len(self.gallery)} face={len(self.face_gallery)} "
+                f"name={self.target_name or 'target'}. "
                 "Press SPACE to re-register, or wait for auto-reacquire."
             )
             self.state = FollowState.LOST
+            who = self.target_name or "target"
             self.last_status = (
-                f"GALLERY LOADED (body={len(self.gallery)} face={len(self.face_gallery)})"
+                f"GALLERY LOADED — {who} "
+                f"(body={len(self.gallery)} face={len(self.face_gallery)})"
             )
             self.enrolled_height_m = self.gallery.height_m
             self.last_seen_time = time.time()
@@ -907,20 +940,47 @@ class ZedFollower(Node):
         self.cmd_pub.publish(twist)
 
     def control_robot(self, distance, angle_rad):
+        """Keep standoff at target_distance (1.2 m).
+
+        distance > 1.2 → move forward
+        distance < 1.2 → move backward
+        near 1.2      → stop (deadband)
+        """
         if not self.actuation_enabled:
             self.last_lin = 0.0
             self.last_ang = 0.0
             self.last_status = "LOCKED (no actuation)"
             return
         twist = Twist()
-        twist.angular.z = max(min(self.k_ang * angle_rad, self.max_ang_speed), -self.max_ang_speed)
-        if distance is None or distance < self.min_distance:
+        twist.angular.z = max(
+            min(self.k_ang * angle_rad, self.max_ang_speed), -self.max_ang_speed
+        )
+
+        if distance is None:
             twist.linear.x = 0.0
-            status = "TOO CLOSE — HOLDING"
+            status = "NO DISTANCE — STOP"
         else:
-            err = distance - self.target_distance
-            twist.linear.x = max(min(self.k_lin * err, self.max_lin_speed), -self.max_lin_speed)
-            status = "FOLLOWING" if abs(twist.linear.x) > 1e-3 or abs(twist.angular.z) > 1e-3 else "ALIGNED"
+            # Positive err = too far → forward; negative = too close → reverse
+            err = float(distance) - float(self.target_distance)
+            db = float(self.distance_deadband_m)
+
+            if distance < self.min_distance:
+                # Person very close — back up at full reverse, still turn to face
+                twist.linear.x = -abs(self.max_lin_speed)
+                status = f"TOO CLOSE {distance:.2f}m — BACK UP"
+            elif abs(err) <= db:
+                twist.linear.x = 0.0
+                status = f"HOLD {self.target_distance:.1f}m"
+            else:
+                cmd = self.k_lin * err
+                twist.linear.x = max(
+                    min(cmd, self.max_lin_speed), -self.max_lin_speed
+                )
+                if err > 0:
+                    status = f"APPROACH {distance:.2f}m → {self.target_distance:.1f}m"
+                else:
+                    status = f"BACK UP {distance:.2f}m → {self.target_distance:.1f}m"
+
         self.last_lin = float(twist.linear.x)
         self.last_ang = float(twist.angular.z)
         self.last_status = status
@@ -983,9 +1043,23 @@ class ZedFollower(Node):
             out.append(b)
         return out
 
-    def begin_register(self):
+    def begin_naming(self):
+        """Ask for person-of-interest name (OpenCV keys), then enroll."""
+        self._name_buffer = ""
+        self.state = FollowState.NAMING
+        self.last_status = "TYPE NAME then ENTER (ESC=cancel)"
+        self.stop_robot()
+        self.get_logger().info("Enter target name — type in the video window, then Enter")
+
+    def begin_register(self, person_name: str | None = None):
+        name = (person_name or self.target_name or "target").strip()
+        if not name:
+            name = "target"
+        self.target_name = name
         self.gallery.clear()
         self.face_gallery.clear()
+        self.gallery.person_name = name
+        self.face_gallery.person_name = name
         self.locked_id = None
         self._lock_source = None
         self.lock_lost_time = None
@@ -997,11 +1071,19 @@ class ZedFollower(Node):
         self.search_angle_rad = 0.0
         self._search_prev_t = None
         self.register_start_t = time.time()
+        self._register_det_scores = []
+        self._register_last_det = 0.0
+        self._register_last_self_sim = 0.0
         self.state = FollowState.REGISTERING
-        self.last_status = "REGISTERING — face camera, then turn slowly"
+        self.last_status = (
+            f"REGISTERING {name} — FACE CAMERA until face>={self.register_min_faces} "
+            f"(FULL={self.register_ideal_faces})"
+        )
         self.stop_robot()
         self.get_logger().info(
-            "Registration started — face camera first (InsightFace), then turn for body views"
+            f"Registration started for '{name}' — strict InsightFace enroll "
+            f"(min_faces={self.register_min_faces}, full={self.register_ideal_faces}, "
+            f"min_det={self.register_min_det_score})"
         )
 
     def reset_identity(self):
@@ -1018,6 +1100,8 @@ class ZedFollower(Node):
         self.lock_lost_time = None
         self.last_target_position = None
         self.enrolled_height_m = None
+        self.target_name = ""
+        self._name_buffer = ""
         self._confirm_id = None
         self._confirm_streak = 0
         self.state = FollowState.IDLE
@@ -1040,42 +1124,172 @@ class ZedFollower(Node):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def _draw_hud(img, fps, state, status, lin, ang, n_gallery, reid_score, dist_text, n_face=0, face_score=0.0):
+def _outlined_text(img, text, org, scale, color, thickness=2, outline=(0, 0, 0)):
+    """Readable text without heavy blending."""
+    x, y = int(org[0]), int(org[1])
+    cv2.putText(img, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, outline, thickness + 2, cv2.LINE_AA)
+    cv2.putText(img, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
+
+
+def _draw_hud(
+    img,
+    fps,
+    state,
+    status,
+    lin,
+    ang,
+    n_gallery,
+    reid_score,
+    dist_text,
+    n_face=0,
+    face_score=0.0,
+    recording: bool = False,
+    target_name: str = "",
+):
     h, w = img.shape[:2]
-    overlay = img.copy()
-    cv2.rectangle(overlay, (0, 0), (w, 110), (20, 20, 20), -1)
-    cv2.addWeighted(overlay, 0.55, img, 0.45, 0, img)
-    cv2.putText(
+    # Solid bar (no addWeighted — much cheaper on Jetson)
+    cv2.rectangle(img, (0, 0), (w, 100), (20, 20, 20), -1)
+    who = (target_name or "").strip()
+    _outlined_text(
         img,
-        f"FPS {fps:.1f}  |  {state.name}  |  body={n_gallery} face={n_face}",
-                (16, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-    cv2.putText(img, status, (16, 62), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (80, 255, 80), 2)
-    cv2.putText(
-        img,
-        f"v={lin:.2f}  w={ang:.2f}  body={reid_score:.2f} face={face_score:.2f}  {dist_text}",
-        (16, 92),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (200, 200, 200),
-        1,
+        f"FPS {fps:.1f}  |  {state.name}  |  face={n_face} body={n_gallery}",
+        (14, 32),
+        0.85,
+        (255, 255, 255),
+        2,
     )
+    if who:
+        _outlined_text(img, f"TARGET: {who}", (14, 68), 1.05, (0, 255, 120), 2)
+    else:
+        _outlined_text(img, status[:75], (14, 68), 0.75, (80, 255, 80), 2)
+    if recording:
+        cv2.circle(img, (w - 36, 30), 12, (0, 0, 255), -1)
+        _outlined_text(img, "REC", (w - 100, 38), 0.9, (0, 0, 255), 2)
+    _outlined_text(
+        img,
+        "SPACE=register  R=reset  V=record  Q=quit",
+        (14, h - 18),
+        0.65,
+        (190, 190, 190),
+        2,
+    )
+
+
+def _draw_name_plate(img, bbox, name: str, color=(0, 255, 0), subtitle: str = ""):
+    """Big name above person — light draw path (no frame copies)."""
+    if bbox is None:
+        return
+    x1, y1, x2, y2 = [int(v) for v in bbox]
+    x1, y1 = max(0, x1), max(0, y1)
+    name = (name or "TARGET").strip() or "TARGET"
+    scale, thickness = 1.35, 3
+    (tw, th), _ = cv2.getTextSize(name, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+    pad_x, pad_y = 12, 10
+    box_w, box_h = tw + 2 * pad_x, th + 2 * pad_y
+    if subtitle:
+        (sw, sh), _ = cv2.getTextSize(subtitle, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+        box_w = max(box_w, sw + 2 * pad_x)
+        box_h += sh + 8
+    bx1 = max(0, min(x1, img.shape[1] - box_w - 2))
+    by2 = max(box_h + 4, y1 - 10)
+    by1 = by2 - box_h
+    cv2.rectangle(img, (bx1, by1), (bx1 + box_w, by2), color, -1)
+    cv2.rectangle(img, (bx1, by1), (bx1 + box_w, by2), (255, 255, 255), 2)
     cv2.putText(
         img,
-        "SPACE=register   R=reset   M=mark   Q=quit+summary",
-        (16, h - 18),
+        name,
+        (bx1 + pad_x, by1 + pad_y + th - 2),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
-        (180, 180, 180),
-        1,
+        scale,
+        (0, 0, 0),
+        thickness,
+        cv2.LINE_AA,
     )
+    if subtitle:
+        cv2.putText(
+            img,
+            subtitle,
+            (bx1 + pad_x, by2 - 6),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (20, 20, 20),
+            2,
+            cv2.LINE_AA,
+        )
+    cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
 
 
 def _draw_body(img, body, bbox, color, label):
+    """Fallback simple box+label (non-target overlays)."""
     if bbox is None:
         return
     x1, y1, x2, y2 = bbox
     cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-    cv2.putText(img, label, (x1, max(20, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    _outlined_text(img, label, (x1, max(32, y1 - 10)), 0.75, color, 2)
+
+
+def _face_roi_from_body(bbox):
+    """Approximate face region from upper body when no face bbox yet."""
+    x1, y1, x2, y2 = [int(v) for v in bbox]
+    bw, bh = x2 - x1, y2 - y1
+    fx1 = x1 + int(0.22 * bw)
+    fx2 = x2 - int(0.22 * bw)
+    fy1 = y1 + int(0.02 * bh)
+    fy2 = y1 + int(0.32 * bh)
+    return fx1, fy1, fx2, fy2
+
+
+def _draw_face_enroll_overlay(img, face_bbox, name: str, progress: float, det: float = 0.0):
+    """Simple face oval + progress (no pulsing blends — keeps FPS up)."""
+    if face_bbox is None:
+        return
+    x1, y1, x2, y2 = [int(v) for v in face_bbox]
+    if x2 <= x1 or y2 <= y1:
+        return
+    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+    ax, ay = max(12, (x2 - x1) // 2), max(16, (y2 - y1) // 2)
+    # Outline only (cheap)
+    cv2.ellipse(img, (cx, cy), (ax, ay), 0, 0, 360, (0, 255, 255), 3)
+    prog = float(max(0.0, min(1.0, progress)))
+    cv2.ellipse(img, (cx, cy), (ax + 12, ay + 12), -90, 0, int(360 * prog), (0, 255, 120), 4)
+    # One scan line (no fill blend)
+    scan_y = y1 + int((0.2 + 0.6 * ((math.sin(time.time() * 3.0) + 1.0) * 0.5)) * (y2 - y1))
+    cv2.line(img, (x1 + 4, scan_y), (x2 - 4, scan_y), (0, 255, 255), 2)
+    who = (name or "TARGET").strip() or "TARGET"
+    _outlined_text(
+        img,
+        f"FACE SCAN: {who}  {int(100 * prog)}%",
+        (max(8, cx - 200), max(36, y1 - 24)),
+        1.0,
+        (0, 255, 255),
+        2,
+    )
+
+
+# Fixed container FPS so playback ≈ wall-clock (live HUD fps can spike and speed up video).
+_DEMO_FPS = 12.0
+
+
+def _open_demo_writer(frame_bgr, fps_hint: float = _DEMO_FPS):
+    """Open an MP4/AVI writer for professor demos (Jetson-safe codecs)."""
+    os.makedirs(_EVAL_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    h, w = frame_bgr.shape[:2]
+    # Always use fixed _DEMO_FPS — do NOT use fluctuating live fps (causes speed-up).
+    fps_w = float(_DEMO_FPS)
+    candidates = [
+        (os.path.join(_EVAL_DIR, f"demo_{stamp}.mp4"), "mp4v"),
+        (os.path.join(_EVAL_DIR, f"demo_{stamp}.avi"), "XVID"),
+        (os.path.join(_EVAL_DIR, f"demo_{stamp}.avi"), "MJPG"),
+    ]
+    for path, fourcc_name in candidates:
+        fourcc = cv2.VideoWriter_fourcc(*fourcc_name)
+        writer = cv2.VideoWriter(path, fourcc, fps_w, (w, h))
+        if writer is not None and writer.isOpened():
+            return writer, path
+        if writer is not None:
+            writer.release()
+    return None, None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1094,8 +1308,10 @@ def main():
 
     zed = node.zed
     window = "ZED Person Follow (Gallery)"
+    # Windowed by default — Jetson OS screen recorders go black on fullscreen OpenCV.
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(window, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.resizeWindow(window, 1280, 720)
+    fullscreen = False
 
     prev_t = time.time()
     frame_count = 0
@@ -1104,8 +1320,16 @@ def main():
     hud_dist = ""
     last_frame = None
     eval_log = EvalLogger()
+    demo_writer = None
+    demo_path = None
+    demo_t0 = None
+    demo_n = 0
     node.get_logger().info(
-        f"Eval logging → {eval_log.path}  |  M=mark event  Q=quit+summary"
+        f"Eval logging → {eval_log.path}  |  M=mark  V=record MP4  F=fullscreen  Q=quit"
+    )
+    node.get_logger().info(
+        f"Demo tip: press V to record @ {_DEMO_FPS:.0f} FPS (eval_logs/). "
+        "Do not use OS screen recorder."
     )
     prev_state = node.state
 
@@ -1196,6 +1420,33 @@ def main():
             for _, b, bbox, *_rest in scored:
                 _draw_body(frame_bgr, b, bbox, (180, 180, 180), f"id={b.id}")
 
+        # ── NAMING (type person-of-interest name) ─────────────────────────
+        elif node.state == FollowState.NAMING:
+            node.stop_robot()
+            buf = node._name_buffer or ""
+            node.last_status = f"NAME: {buf}_   (ENTER=start  ESC=cancel)"
+            for _, b, bbox, *_rest in scored:
+                _draw_body(frame_bgr, b, bbox, (180, 180, 180), f"id={b.id}")
+            # Big name prompt in the middle of the frame
+            h, w = frame_bgr.shape[:2]
+            msg = f"Person of interest: {buf}_"
+            _outlined_text(
+                frame_bgr,
+                msg,
+                (max(20, w // 2 - 320), h // 2),
+                1.4,
+                (0, 255, 255),
+                3,
+            )
+            _outlined_text(
+                frame_bgr,
+                "Type name  |  ENTER confirm  |  ESC cancel",
+                (max(20, w // 2 - 300), h // 2 + 48),
+                0.95,
+                (220, 220, 220),
+                2,
+            )
+
         # ── REGISTERING ──────────────────────────────────────────────────
         elif node.state == FollowState.REGISTERING:
             node.stop_robot()
@@ -1218,11 +1469,24 @@ def main():
                     emb = node.reid.extract(frame_bgr, bbox)
                     if emb is not None:
                         node.gallery.add(emb, min_novelty=0.015)
-                # InsightFace enroll: Face.normed_embedding into FaceGallery
+                # InsightFace enroll: only high-det faces (strict first step)
                 face = _best_face_for_body(faces, bbox)
+                face_box = None
+                if face is not None and getattr(face, "bbox", None) is not None:
+                    face_box = [int(v) for v in face.bbox]
                 if face is not None and getattr(face, "normed_embedding", None) is not None:
-                    if node.face_gallery.add(face.normed_embedding, min_novelty=0.02):
-                        hud_face = 1.0
+                    det = float(getattr(face, "det_score", 0.0) or 0.0)
+                    node._register_last_det = det
+                    if det >= node.register_min_det_score:
+                        emb = face.normed_embedding
+                        # Self-sim vs gallery (informational; after 1st sample)
+                        if len(node.face_gallery) > 0:
+                            node._register_last_self_sim = float(
+                                node.face_gallery.score(emb)
+                            )
+                        if node.face_gallery.add(emb, min_novelty=0.02):
+                            node._register_det_scores.append(det)
+                            hud_face = det
                 if h_est is not None:
                     node.enrolled_height_m = h_est
                     node.gallery.height_m = h_est
@@ -1231,68 +1495,105 @@ def main():
                 node.last_seen_time = time.time()
                 target_body, target_bbox, target_xyz = b, bbox, xyz
                 detected = True
-                _draw_body(
+                who = node.target_name or "target"
+                n_face_now = len(node.face_gallery)
+                prog = n_face_now / float(max(1, node.register_ideal_faces))
+                # Demo visual: animated face mask + big name (recognition logic unchanged)
+                if face_box is None:
+                    face_box = _face_roi_from_body(bbox)
+                _draw_face_enroll_overlay(
                     frame_bgr,
-                    b,
+                    face_box,
+                    who,
+                    progress=prog,
+                    det=node._register_last_det,
+                )
+                _draw_name_plate(
+                    frame_bgr,
                     bbox,
-                    (0, 200, 255),
-                    f"ENROLL id={b.id} F={len(node.face_gallery)}",
+                    who,
+                    color=(0, 200, 255),
+                    subtitle=f"Registering face  {n_face_now}/{node.register_ideal_faces}",
                 )
 
             elapsed = time.time() - node.register_start_t
-            frac = elapsed / max(node.register_duration_sec, 1e-3)
-            if frac < 0.35:
-                pose_hint = "FACE CAMERA (InsightFace)"
-            elif frac < 0.55:
-                pose_hint = "turn LEFT"
-            elif frac < 0.75:
-                pose_hint = "show BACK"
-            else:
-                pose_hint = "turn RIGHT → face camera"
             n_emb = len(node.gallery)
             n_face = len(node.face_gallery)
+            face_full = n_face >= node.register_ideal_faces
+            face_ok = n_face >= node.register_min_faces
+            # Stay on FACE CAMERA until strict face gate met; then body turn.
+            if not face_ok:
+                pose_hint = (
+                    f"FACE CAMERA — need face {n_face}/{node.register_min_faces} "
+                    f"(FULL={node.register_ideal_faces})"
+                )
+            elif not face_full:
+                frac = elapsed / max(node.register_duration_sec, 1e-3)
+                if frac < 0.55:
+                    pose_hint = "FACE CAMERA — fill to FULL 32 (small head turns OK)"
+                elif frac < 0.70:
+                    pose_hint = "turn LEFT (body)"
+                elif frac < 0.85:
+                    pose_hint = "show BACK (body)"
+                else:
+                    pose_hint = "turn RIGHT → face camera"
+            else:
+                pose_hint = "FULL FACE — turn for body views"
+            mean_det = (
+                float(sum(node._register_det_scores) / len(node._register_det_scores))
+                if node._register_det_scores
+                else 0.0
+            )
             node.last_status = (
                 f"REGISTERING {elapsed:.1f}/{node.register_duration_sec:.0f}s  "
-                f"body={n_emb} face={n_face}  → {pose_hint}"
+                f"face={n_face}/{node.register_ideal_faces} det={mean_det:.2f} "
+                f"self={node._register_last_self_sim:.2f} body={n_emb}  → {pose_hint}"
             )
             body_ok = n_emb >= node.register_min_embeds or (
                 elapsed >= node.register_duration_sec * 1.4 and n_emb >= 12
             )
-            face_ok = n_face >= node.register_min_faces
-            done = elapsed >= node.register_duration_sec and body_ok
-            if done and n_emb >= 8:
+            # Strict: NEVER leave REGISTERING without face_ok (min 16 samples)
+            done = elapsed >= node.register_duration_sec and body_ok and face_ok
+            # Early finish when FULL face load + body enough
+            if face_full and body_ok and elapsed >= 3.0:
+                done = True
+            if done:
                 node.gallery.save()
-                if n_face > 0:
-                    node.face_gallery.save()
+                node.face_gallery.save()
                 node.state = FollowState.FOLLOWING
                 node._lock_source = "register"
                 node._follow_mismatch_streak = 0
                 node.lock_lost_time = None
                 node.search_angle_rad = 0.0
                 node._search_prev_t = None
-                if face_ok and n_emb >= 16:
+                if face_full and mean_det >= node.register_min_det_score:
+                    quality = "FULL"
+                elif n_face >= node.register_min_faces and mean_det >= node.register_min_det_score:
                     quality = "GOOD"
-                elif face_ok:
-                    quality = "OK"
-                elif n_face > 0:
-                    quality = "WEAK FACE — re-register facing camera"
                 else:
-                    quality = "NO FACE — reacquire needs face; press R"
+                    quality = "OK"
+                who = node.target_name or "target"
                 node.last_status = (
-                    f"REGISTERED {quality} (body={n_emb} face={n_face}) — FOLLOW"
+                    f"REGISTERED {who} {quality} "
+                    f"(face={n_face}/{node.register_ideal_faces} "
+                    f"det={mean_det:.2f} body={n_emb}) — FOLLOW"
                 )
                 node._pending_eval_event = "REGISTERED"
                 node.get_logger().info(
-                    f"Galleries saved body={n_emb} → {_GALLERY_PATH} | "
-                    f"face={n_face} → {_FACE_GALLERY_PATH}"
+                    f"Galleries saved for '{who}' body={n_emb} → {_GALLERY_PATH} | "
+                    f"face={n_face} det_mean={mean_det:.3f} → {_FACE_GALLERY_PATH}"
                 )
             elif elapsed >= node.register_duration_sec * 1.8:
                 node.last_status = (
-                    f"REGISTER FAILED (body={n_emb} face={n_face}) — alone? face cam?"
+                    f"REGISTER FAILED (face={n_face}/{node.register_min_faces} "
+                    f"need>={node.register_min_faces}, det>={node.register_min_det_score:.2f}, "
+                    f"body={n_emb}) — face camera, alone, well lit"
                 )
                 node.state = FollowState.IDLE
                 node.gallery.clear()
                 node.face_gallery.clear()
+                node._register_det_scores = []
+                node.target_name = ""
 
         # ── FOLLOWING (tracker_node style: trust ZED id; no body ReID veto) ─
         elif node.state == FollowState.FOLLOWING:
@@ -1342,12 +1643,13 @@ def main():
                 node.search_angle_rad = 0.0
                 node._search_prev_t = None
                 src = node._lock_source or "?"
-                _draw_body(
+                who = node.target_name or "target"
+                _draw_name_plate(
                     frame_bgr,
-                    b,
                     bbox,
-                    (0, 255, 0),
-                    f"TARGET id={b.id} via={src}",
+                    who,
+                    color=(0, 255, 0),
+                    subtitle=f"Tracking  via {src}",
                 )
             else:
                 # Locked ZED id gone → appearance reacquire (face first)
@@ -1375,7 +1677,7 @@ def main():
                     b,
                     bbox,
                     col,
-                    f"id={b.id} F={face_sim:.2f}/{face_decision[:4]} B={gscore:.2f}",
+                    f"F={face_sim:.2f} {face_decision[:4]}",
                 )
 
             chosen = None
@@ -1483,10 +1785,12 @@ def main():
                     f"REACQUIRING {node._confirm_streak}/{node.confirm_frames} "
                     f"{how}={gscore:.2f}"
                 )
-                _draw_body(frame_bgr, b, bbox, (0, 255, 255), f"CAND id={b.id} {how}")
+                who = node.target_name or "target"
+                _draw_body(frame_bgr, b, bbox, (0, 255, 255), f"Match? {who}")
                 # Face matches are stronger — confirm faster (tracker_node locks ASAP)
                 need_confirm = 3 if how == "face" else node.confirm_frames
                 if node._confirm_streak >= need_confirm:
+                    who = node.target_name or "target"
                     node.locked_id = b.id
                     node._lock_source = how
                     node.last_target_position = xyz
@@ -1501,13 +1805,20 @@ def main():
                     target_score = gscore
                     detected = True
                     node.last_seen_time = time.time()
-                    node.last_status = f"REACQUIRED id={b.id} via {how}={gscore:.2f}"
+                    node.last_status = f"REACQUIRED {who} id={b.id} via {how}={gscore:.2f}"
                     node._pending_eval_event = (
                         "REACQUIRED_FACE" if how == "face" else "REACQUIRED_BODY"
                     )
                     node.get_logger().info(
-                        f"Reacquired ZED id={b.id} via {how} score={gscore:.2f} "
+                        f"Reacquired '{who}' ZED id={b.id} via {how} score={gscore:.2f} "
                         f"(lock held until ZED id lost — no body veto)"
+                    )
+                    _draw_name_plate(
+                        frame_bgr,
+                        bbox,
+                        who,
+                        color=(0, 255, 0),
+                        subtitle=f"Reacquired via {how}",
                     )
             else:
                 node._confirm_id = None
@@ -1543,14 +1854,7 @@ def main():
             hud_dist = f"{distance:.2f}m  {abs(deg):.0f}° {side}"
             hud_reid = target_score
             node.control_robot(distance, angle_error)
-            if target_bbox is not None and target_body is not None:
-                _draw_body(
-                    frame_bgr,
-                    target_body,
-                    target_bbox,
-                    (0, 255, 0),
-                    f"TARGET {target_score:.2f}",
-                )
+            # Name plate already drawn in FOLLOWING branch — keep it dominant (no overwrite)
         elif node.state in (FollowState.LOST, FollowState.REACQUIRING):
             now = time.time()
             since = (now - node.last_seen_time) if node.last_seen_time > 0 else 1e9
@@ -1666,10 +1970,50 @@ def main():
             hud_dist if detected else "",
             n_face=len(node.face_gallery),
             face_score=hud_face,
+            recording=(demo_writer is not None),
+            target_name=node.target_name or "",
         )
+        if demo_writer is not None:
+            try:
+                # Pace writes to _DEMO_FPS so file duration ≈ wall-clock (not sped up).
+                elapsed = time.time() - demo_t0
+                target_n = int(elapsed * _DEMO_FPS) + 1
+                while demo_n < target_n:
+                    demo_writer.write(frame_bgr)
+                    demo_n += 1
+            except Exception as e:
+                node.get_logger().error(f"Demo write failed: {e}")
+                demo_writer.release()
+                demo_writer = None
+                demo_path = None
+                demo_t0 = None
+                demo_n = 0
         cv2.imshow(window, frame_bgr)
 
         key = cv2.waitKey(1) & 0xFF
+        # ── Naming: type person-of-interest name in the video window ──
+        if node.state == FollowState.NAMING:
+            if key in (ord("q"),):
+                break
+            if key in (27,):  # ESC cancel
+                node._name_buffer = ""
+                node.state = FollowState.IDLE
+                node.last_status = "PRESS SPACE TO REGISTER"
+            elif key in (13, 10):  # Enter confirm
+                name = (node._name_buffer or "").strip()
+                if not name:
+                    node.last_status = "NAME empty — type a name, then ENTER"
+                else:
+                    eval_log.mark("SPACE_REGISTER")
+                    node.begin_register(name)
+            elif key in (8, 127):  # Backspace
+                node._name_buffer = node._name_buffer[:-1]
+            elif 32 <= key <= 126:
+                # Printable ASCII (letters, digits, space, punctuation)
+                if len(node._name_buffer) < 32:
+                    node._name_buffer += chr(key)
+            continue
+
         if key in (ord("q"), 27):
             break
         elif key == ord(" "):
@@ -1677,8 +2021,7 @@ def main():
                 node.get_logger().error("Cannot register — no face/body ReID")
                 node.last_status = "NO FACE/BODY ENGINE — cannot register"
             else:
-                eval_log.mark("SPACE_REGISTER")
-                node.begin_register()
+                node.begin_naming()
         elif key in (ord("r"), ord("R")):
             eval_log.mark("RESET")
             node.reset_identity()
@@ -1688,8 +2031,54 @@ def main():
             eval_log.mark(tag)
             node.last_status = f"{node.last_status} | {tag}"
             node.get_logger().info(f"EVAL {tag} recorded")
+        elif key in (ord("f"), ord("F")):
+            fullscreen = not fullscreen
+            cv2.setWindowProperty(
+                window,
+                cv2.WND_PROP_FULLSCREEN,
+                cv2.WINDOW_FULLSCREEN if fullscreen else cv2.WINDOW_NORMAL,
+            )
+            if not fullscreen:
+                cv2.resizeWindow(window, 1280, 720)
+            node.get_logger().info(
+                f"Display → {'FULLSCREEN' if fullscreen else 'WINDOWED (better for demos)'}"
+            )
+        elif key in (ord("v"), ord("V")):
+            if demo_writer is not None:
+                wall = time.time() - demo_t0 if demo_t0 else 0.0
+                vid = demo_n / _DEMO_FPS if _DEMO_FPS else 0.0
+                demo_writer.release()
+                demo_writer = None
+                node.last_status = f"DEMO SAVED → {demo_path}"
+                node.get_logger().info(
+                    f"Demo recording stopped: {demo_path}  "
+                    f"wall={wall:.1f}s video={vid:.1f}s frames={demo_n} @ {_DEMO_FPS:.0f}fps"
+                )
+                eval_log.mark("DEMO_STOP")
+                demo_path = None
+                demo_t0 = None
+                demo_n = 0
+            else:
+                demo_writer, demo_path = _open_demo_writer(frame_bgr)
+                if demo_writer is None:
+                    node.last_status = "DEMO RECORD FAILED — codec/open error"
+                    node.get_logger().error("Could not open demo VideoWriter")
+                else:
+                    demo_t0 = time.time()
+                    demo_n = 0
+                    node.last_status = f"DEMO RECORDING → {os.path.basename(demo_path)}"
+                    node.get_logger().info(
+                        f"Demo recording started: {demo_path} @ {_DEMO_FPS:.0f} FPS (real-time)"
+                    )
+                    eval_log.mark("DEMO_START")
 
     node.stop_robot()
+    if demo_writer is not None:
+        wall = time.time() - demo_t0 if demo_t0 else 0.0
+        demo_writer.release()
+        node.get_logger().info(
+            f"Demo recording saved: {demo_path}  wall={wall:.1f}s frames={demo_n}"
+        )
     eval_log.close_and_summarize()
     if node.reid is not None:
         node.reid.close()
