@@ -357,7 +357,7 @@ def main():
     # EKF variables
     ekf = None
     previous_timestamp = None
-    seconds_ahead = 4.8
+    seconds_ahead = 1.0
 
     # Evaluation variables
     prediction_buffer = []
