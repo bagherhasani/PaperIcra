@@ -183,4 +183,43 @@ ZED body tracking
         → ADE vs future ground truth
 ```
 
-Later (not these files yet): publish that 1 s pose into Nav2 as predicted occupancy.
+---
+
+## Next steps (do in this order)
+
+### Done
+- [x] Lock horizon = 1.0 s
+- [x] Run CTRV vs Hip on D-walk + straight
+- [x] Save results in this folder
+
+### Step 1 — Static baseline (do next)
+**What:** Add a third “model”: predict future = current position (person never moves).
+
+**Why:** That is what Nav2 costmap assumes. Hip/CTRV should beat it by a lot.
+
+**How:**
+1. Add `MOTION_MODEL = "static"` (future px,py = current px,py)
+2. Re-run D-walk + straight at 1 s
+3. Add one row to the results table: static / CTRV / hip
+
+### Step 2 — Nav2 experiment (only after Step 1)
+**What:** Same robot stack, two modes:
+- inflate costmap at person **now** (static)
+- inflate costmap at person **+1 s** (hip predict)
+
+**How it works:**
+```
+ZED → EKF hip → predicted pose at +1 s
+                    ↓
+         publish to Nav2 costmap
+                    ↓
+         robot plans around future position
+```
+
+**Measure:** time-to-goal, time stuck, success / near-miss — predicted vs static.
+
+### Do not do yet
+- More motion models (idea2/idea3)
+- 4.8 s horizon
+- Full building navigation / crowds
+
