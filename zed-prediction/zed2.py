@@ -348,6 +348,15 @@ def main():
     # Import after ZED + body tracking are up — scipy/GPU collision on Jetson if imported earlier
     from ekf_zed import Ekf
 
+    # Live RViz danger zone (blue=now, red=+1s). Fails soft if ROS not sourced.
+    danger_zone = None
+    try:
+        from danger_zone_ros import DangerZonePublisher
+        danger_zone = DangerZonePublisher()
+        print("[RViz] Publishing /person/danger_zone — Fixed Frame=map, MarkerArray topic")
+    except Exception as e:
+        print(f"[RViz] Danger zone OFF ({e}). source /opt/ros/humble/setup.bash to enable.")
+
     bodies = sl.Bodies()
     image_zed = sl.Mat()
 
@@ -358,6 +367,7 @@ def main():
     ekf = None
     previous_timestamp = None
     seconds_ahead = 1.0
+    rviz_ahead = 2.0
 
     # Evaluation variables
     prediction_buffer = []
@@ -489,6 +499,14 @@ def main():
                         )
 
                         future_px, future_py = ekf.predictFuture(seconds_ahead)
+                        rviz_px, rviz_py = ekf.predictFuture(rviz_ahead)
+
+                        # Live RViz: blue dot = now, red arrow = +2 s
+                        if danger_zone is not None:
+                            try:
+                                danger_zone.publish(px, py, rviz_px, rviz_py)
+                            except Exception as e:
+                                print(f"[RViz] publish failed: {e}")
 
                         future_trajectory = ekf.predictFutureTrajectory(
                             seconds_ahead,
@@ -723,6 +741,12 @@ def main():
             break
 
     csv_file.close()
+
+    if danger_zone is not None:
+        try:
+            danger_zone.close()
+        except Exception:
+            pass
 
     zed.disable_body_tracking()
     zed.close()
