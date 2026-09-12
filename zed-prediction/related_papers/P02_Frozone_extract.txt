@@ -1,0 +1,1207 @@
+
+
+===== PAGE 1 =====
+
+Frozone: Freezing-Free, Pedestrian-Friendly Navigation in Human
+Crowds
+Adarsh Jagan Sathyamoorthy, Utsav Patel, Tianrui Guan, and Dinesh Manocha
+Abstract— We present Frozone, a novel algorithm to deal
+with the Freezing Robot Problem (FRP) that arises when
+a robot navigates through dense scenarios and crowds. Our
+method senses and explicitly predicts the trajectories of pedes-
+trians and constructs a Potential Freezing Zone (PFZ); a spatial
+zone where the robot could freeze or be obtrusive to humans.
+Our formulation computes a deviation velocity to avoid the
+PFZ, which also accounts for social constraints. Furthermore,
+Frozone is designed for robots equipped with sensors with a
+limited sensing range and ﬁeld of view. We ensure that the
+robot’s deviation is bounded, thus avoiding sudden angular
+motion which could lead to the loss of perception data of
+the surrounding obstacles. We have combined Frozone with a
+Deep Reinforcement Learning-based (DRL) collision avoidance
+method and use our hybrid approach to handle crowds of
+varying densities. Our overall approach results in smooth
+and collision-free navigation in dense environments. We have
+evaluated our method’s performance in simulation and on real
+differential drive robots in challenging indoor scenarios. We
+highlight the beneﬁts of our approach over prior methods
+in terms of success rates (upto 50 % increase), pedestrian-
+friendliness (100 % increase) and the rate of freezing ( > 80%
+decrease) in challenging scenarios.
+I. INTRODUCTION
+Mobile robots are increasingly used in many indoor sce-
+narios. This includes applications such as waiters in hotels, as
+helpers in hospitals, as transporters of goods in warehouses,
+for surveillance, package delivery etc. To accomplish such
+tasks, these robots need to navigate through dense and
+challenging dynamic environments, speciﬁcally in crowds
+with pedestrian densities ranging from < 1 to 2 persons/m2.
+Apart from avoiding collisions with static and dynamic
+obstacles in its surroundings, the robot should also navigate
+in a pedestrian-friendly way. The latter includes satisfying
+social constraints [1], [2], [3], such as maintaining sufﬁcient
+distance from the pedestrians and other rules corresponding
+to avoiding them from behind (See Fig.1 Bottom).
+A challenging problem that a robot could face in such
+scenarios is the Freezing Robot Problem (FRP) [4], [5]. FRP
+occurs when the robot faces a situation where the collision
+avoidance module declares that all possible velocities may
+lead to collisions. The robot either halts or starts oscillating
+indeﬁnitely, which could either result in a collision or it does
+not make progress towards its goal. In practice, it is non-
+trivial to completely avoid FRP in crowds beyond a certain
+density without human cooperation [5]. One of the goals is to
+develop approaches that can reduce the occurrence of FRP in
+moderately dense crowds (≤1 person/m2) without assuming
+human cooperation, and using limited sensing capabilities.
+There have been a few works addressing FRP [4], [5],
+[6], [7]. Some approaches have also attempted to solve the
+problems of freezing and loss of localization in a crowd
+simultaneously [8]. While these methods are promising,
+we need more general solutions which rely less on global
+Fig. 1: [Top] An instance of the Freezing Robot Problem
+(FRP), where the robot halts or oscillates indeﬁnitely when
+it faces scenarios with pedestrians, as shown (highlighted
+in red). [Bottom] Another scenario where our approach
+implemented on a Clearpath Jackal robot navigates amongst
+pedestrians and preemptively avoids FRP. Our method ex-
+plicitly tracks and predicts pedestrians’ positions in the
+sensing range of the robot and classiﬁes each pedestrian as
+potentially-freezing or non-freezing. We compute a potential
+freezing zone (PFZ) (shown in red) and our method deviates
+the robot away from the freezing zone (green trajectory),
+while previous methods move the robot towards that zone
+(red trajectory).
+information and can provide some guarantees on the resulting
+performance.
+In order to address freezing, it is important to compute
+a collision-free trajectory for the robot based on local
+knowledge of the environment from its sensor data. The
+problen of collision avoidance is well studied and some of
+the widely used methods are based on velocity obstacles [9],
+[10], [11], the dynamic window approach [12], etc. More
+recently, many techniques have been proposed based on Deep
+Reinforcement Learning (DRL) collision avoidance [13],
+[14], [15], [16], [17]. Decentralized DRL-based methods
+have gained popularity due to their superior performance in
+terms of success rates, average robot velocity, etc compared
+to traditional methods, and their ability to handle large
+numbers of dynamic obstacles, and can be robust to sensor
+uncertainty. However, it is hard to provide any guarantees.
+Main Contributions:
+• We present Frozone, a real-time algorithm that sig-
+niﬁcantly reduces the occurrence of FRP by explic-
+arXiv:2003.05395v1  [cs.RO]  11 Mar 2020
+
+
+===== PAGE 2 =====
+
+Fig. 2: Frozone tested on a Turtlebot in dense crowds. Our
+tests demonstrate the applicability of our method on different
+mobile robots with limited sensing capabilities equipped with
+different perception sensors. The Potential Freezing Zone is
+represented in red.
+itly predicting pedestrian trajectories, classifying them
+as potentially-freezing or non-freezing pedestrians and
+constructing a Potential Freezing Zone (PFZ). PFZ
+corresponds to a conservative spatial zone where the
+robot might freeze and be obtrusive to humans. Our
+method calculates a deviation to modify the robot’s
+velocity to avoid the PFZ leading to a decrease of more
+than 80% in freezing rates over prior algorithms.
+• Our method ensures that the robot’s velocity avoids
+the PFZ, and is unobtrusive to the nearby pedestrians
+based on their social and psychological constraints
+for personal space. We observe an improvement in
+the pedestrian-friendliness of the robot’s trajectories by
+100%.
+• We combine Frozone with a state-of-the-art DRL-based
+collision avoidance method and present a hybrid naviga-
+tion algorithm that combines the beneﬁts of traditional
+model-based algorithms such as better guarantees, and
+DRL-based approaches like better robustness to sensor
+uncertainty.
+We evaluate our method in simulation and on a Clearpath
+Jackal (Fig. 1) and a Turtlebot (Fig. 2) in several challenging
+indoor scenarios with crowds of varying densities (< 1
+person/m2 to > 2 persons/m2).
+II. RELATED WORK
+We discuss the relevant previous work on the Freezing
+Robot Problem, DRL-based collision avoidance methods,
+and socially-aware navigation.
+A. Freezing Robot Problem
+The earliest works addressing FRP [4], [5] argue that it
+can only be solved by accounting for human-robot cooper-
+ation [18] in terms of robot navigation, meaning that the
+robot and the humans need to adjust their trajectories. These
+methods also show that even perfect pedestrian trajectory
+prediction would not help in solving FRP, unless human-
+robot cooperation is explicitly modeled. Other attempts at
+solving FRP include a method based on learning from
+demonstration [19] and improved motion prediction based on
+the Markov Decision Process [6]. The resulting algorithms
+use static CCTV cameras or simulations to validate their
+methods and do not fully account for many practical issues
+that arise on a real robot such as the loss of sensing data due
+to the robot’s motion. Reducing FRP using a trained deep
+learning policy using implicit pedestrian prediction [7] has
+also been investigated. Our approach is complimentary to
+these methods and is more robust in terms of reducing FRP.
+B. Deep Reinforcement Learning-based Collision Avoidance
+In recent years, methods based on DRL have been used
+for navigation in dense scenes. Some methods have had great
+success with training a decentralized collision avoidance pol-
+icy [16] and combining it with traditional control strategies
+[20]. The trained DRL policy has been extended to solve
+the loss of localization and FRP simultaneously by learning
+recovery points [8]. While these DRL methods model co-
+operative behaviors between humans and robots implicitly,
+other methods explicitly model cooperation using a value
+network with two agents [14] or an arbitrary number of
+agents [15]. Intra-crowd interactions, which could indirectly
+affect a robot’s navigation, have also been studied [13]. DRL-
+based methods have also been extended to navigate in a
+socially acceptable manner [3], providing safety guarantees
+by identifying previously unseen scenarios and performing
+more cautious maneuvers [21]. Our hybrid algorithm can also
+be combined with these DRL-based approaches.
+C. Socially Aware Navigation
+Robots navigating among pedestrians should reduce the
+amount of discomfort to the surrounding humans. Prior
+work in crowd or pedestrian simulation provides insights on
+the psychological and environmental factors that affect the
+pedestrian’s motion or trajectory [1], [22], which should be
+accounted during robot navigation. Works on socially aware
+robot navigation include predicting the long-term trajectories
+of pedestrians using personality trait theory and Bayesian
+learning [2] and classifying group emotions [23]. Learning-
+based methods can be used to account for social norms by
+specifying the behaviors that should be avoided [24]. In our
+work, we use these ideas and focus on computing robot
+velocities that maintain a comfortable distance in-front of
+pedestrians.
+III. BACKGROUND AND OVERVIEW
+We deﬁne the notation used in our approach and provide
+some background on the different components used. We also
+discuss the factors that affect pedestrian motion in a crowd
+and use them to model the social constraints.
+A. Notation and Symbols
+We
+represent
+each
+pedestrian
+as
+[pped, uped]
+=
+[pped
+x
+, pped
+y
+, uped
+x
+, uped
+y
+] ∈R4, where pped and uped rep-
+resent the 2-D position and unit vector representing the
+front/forward direction of the pedestrian, respectively. We
+assume that the robot knows its relative goal location and
+denote it as grob. All values are speciﬁed with respect to
+a coordinate frame attached to the robot, with an origin
+denoted by orob as shown in Fig. 3(a). Therefore, the forward
+heading direction of the robot always corresponds to (1
+ˆi + 0ˆj) and the direction towards the left is represented as
+(0 ˆi + 1ˆj). We represent scalar values in normal fonts and
+vectors using bold fonts.
+
+
+===== PAGE 3 =====
+
+We assume that the robot is equipped with a depth
+camera to sense nearby pedestrians. Its sensing region Srob
+is formulated as a square space with a side length of ssen
+meters in front of the robot (see Fig.3(a)). Our approach can
+be easily modiﬁed for other sensing regions. The sensing
+region is offset in front of the robot by f meters to account
+for sensing inaccuracies in the depth image, which could
+arise for objects too close to the robot. The depth image I
+at any time instant t, and the value of a pixel at (i, j) which
+contains the proximity of an object at that part of the image,
+are represented as:
+It = {C ∈Rw×h : f < Cij < f + ssen},
+1 ≤i ≤w
+and
+1 ≤j ≤h,
+(1)
+where w, h, i and j are the image’s width, height, and the
+indices along the width and height, respectively. We deﬁne
+dist(a, b) as a function that computes the Euclidean distance
+between points a and b.
+B. Pedestrian Behavior in crowds
+Pedestrian motions in crowds are inﬂuenced by several
+factors such as crowd density, individual stride length, and
+need for personal space. Pedestrians tend to walk slower
+when there is less space in front of them (i.e., dense crowd).
+The fundamental diagram [1] is used to model this behavior
+through an inverse relationship between pedestrian velocities
+and the crowd density.
+A pedestrian’s natural walking speed (vped) is related
+to physiological (pedestrian’s height and stride length) and
+psychological (need for personal space) factors [1] using the
+following equation:
+vped = min
+
+||⃗vpref||,
+
+Sα
+H(1+β)
+2
+(2)
+where ||⃗vpref|| is the pedestrian’s preferred speed directed
+towards its goal, which we assume to be 1.3 meters/second
+(on average). S is the available space in front of the pedes-
+trian, H (height/1.72) is a height normalization factor, and
+α and β are constants that account for the stride of the
+pedestrian. We assume that all the pedestrians have the same
+values for H, α and β. We use the velocity relationship in
+Equation 2 to predict the future positions of pedestrians after
+a time ∆t. This formulation is complimentary to existing
+trajectory prediction methods, and also accounts for human
+psychological need for space while walking. From Equation
+2, we infer that a pedestrian’s motion is unaffected when a
+robot avoids/passes them from behind or if it leaves sufﬁcient
+space in front of them (high value of S).
+Therefore, in our approach, we compute a deviation for
+the robot velocity such that the robot maintains sufﬁcient
+distance in-front of the pedestrians, and avoids them from
+behind when possible. We deﬁne η as the pedestrians’
+comfortable distance threshold based on social constraints,
+i.e. the distance that the robot needs to maintain from a
+pedestrian whenever possible. In addition, we deﬁne the
+pedestrian-friendliness (PF) of the robot as,
+PF = Z ∗N∞+ ¯Z ∗min(dist(orob, pped
+i
+)),
+(3)
+where Z is a boolean that represents if a pedestrian has been
+avoided from behind, N∞is a large value, and pped
+i
+repre-
+sents the position of the ith pedestrian in the environment.
+C. Pedestrian Detection and Tracking
+Object detection and tracking are used to locate the
+pedestrians in the image from the depth camera and mark
+their trajectories accurately. These problems are well studied
+in computer vision and robotics literature, and recently, good
+solutions are proposed based on deep learning. We use a
+pre-trained YOLOv3 [25] model for pedestrian detection
+in the depth images. YOLOv3 outputs a set of bounding
+boxes for the detected pedestrians as B = {Bk | B =
+[top left, mB, nB], ∈H}, where top left, mB, and nB denote
+the top left corner coordinates, width, and height of the
+kth bounding box Bk, respectively. H denotes the set of all
+pedestrian detections. In addition, it also assigns an ID for a
+given image and reports the detection conﬁdence.
+The detection bounding boxes are used as inputs to
+DensePeds [26], a state-of-the-art pedestrian tracking algo-
+rithm that assigns a unique ID to each detected pedestrian
+across multiple consecutive images. This ID is used to
+compute each pedestrian’s position in the image over time.
+We use DensePeds as it is robust to the noise in the image
+and performs with an accuracy of over 93% in dense (> 1
+person/m2) scenarios.
+D. DRL-based Collision Avoidance
+As mentioned previously, we interface an end-to-end
+DRL-based collision avoidance policy [16] with Frozone.
+The policy uses observations from a 2-D lidar (ot
+lidar), the
+robot’s relative goal location (ot
+goal), and its current velocity
+(ot
+vel) to compute new collision avoiding velocities at each
+time instant. During training, a reward/penalty function is
+shaped to: (i) minimize the robot’s time to reach its goal,
+(ii) reduce oscillatory motions in the robot, (iii) head towards
+the robot’s goal, and most importantly, (iv) avoids collisions.
+Post training, a collision free velocity vDRL at each time
+instant is sampled from a trained policy πθ as:
+vDRL ∼πθ(vt|ot),
+(4)
+where vt and ot are the velocity and the observation spaces
+at time t, respectively.
+IV. OUR METHOD: FROZONE
+In this section, we describe how we formulate the freezing
+robot problem. This includes various components includ-
+ing pedestrian classiﬁcation, the construction of a potential
+freezing zone, and our formulation to calculate the deviation
+needed to avoid the freezing zone.
+A. Formulation of FRP
+Consider a scenario as shown in Fig. 3(a), where a robot
+faces a set of T pedestrians in its sensing region before
+reaching its goal. The pedestrians could either be mobile
+or stationary.
+Deﬁnition- IV.1 (Freezing Robot Problem). If the pedes-
+trians are stationary and are positioned such that
+dist(pped
+i
+, pped
+i+1) < 2Ω
+∀i ∈{1, 2, ..., T},
+dist(orob, pped
+i
+) ≤Ω
+∀i ∈{1, 2, ..., T},
+pped
+i
+, pped
+i+1 ∈Srob,
+(5)
+
+
+===== PAGE 4 =====
+
+Fig. 3: (a) An example for the freezing robot scenario. The robot does not ﬁnd enough space between pedestrians (red
+circles) to move towards its goal and the robot’s navigation module concludes that all velocities towards the goal would
+lead to a collision. (b) The range of pedestrian velocity directions that are considered as potentially-freezing in the left and
+right half planes of the sensing region. Pedestrian velocities along the robot’s X-axis are special cases of an either head-on
+approach or a pedestrian moving away. (c) The construction of the Potential Freezing Zone (PFZ), which is the convex hull
+of the predicted positions of potentially-freezing pedestrians after time ∆t. The deviation angle φ is computed such that the
+robot is directed away from the PFZ with the least amount of deviation from its current velocity.
+where pped
+i
+and pped
+i+1 are the positions of the ith and
+(i+1)th pedestrian with respect to the robot, and Ωdenotes
+the minimum distance threshold that the robot’s collision
+avoidance module should maintain with all obstacles. If
+the conditions in 5 are satisﬁed then the planner deems all
+forward velocities as unsafe. Such a scenario constitutes the
+Freezing Robot Problem. One possible technique (without
+human cooperation) for the robot to reach its goal is to
+retrace its path, identify the free space, and re-plan its
+trajectory. This typically requires global knowledge of the
+environment, such as a map of the environment and all dy-
+namic obstacles, which may not readily available. The robot
+either halts completely or generates undesirable behaviors
+such as oscillations, which severely degrade the efﬁciency
+of the robot’s navigation.
+If the humans are non-stationary, the robot disrupts their
+velocities due to its low proximity in front of them (i.e. low
+value of S). This reduces the robot navigation’s pedestrian-
+friendliness. Therefore, we develop an approach where the
+robot is able to predict if such scenarios could occur in
+the near future and preemptively avoid them. This simul-
+taneously reduces the occurrence of FRP and improves the
+robot’s pedestrian-friendliness in terms of social constraints.
+B. Computing Pedestrian Poses and Prediction
+The pedestrian positions and orientations are obtained by
+tracking pedestrians in the image produced by the depth cam-
+era. Referring to Equation 1, the value of the (i, j)th pixel in
+the image Cij contains the proximity of an obstacle present
+in that part of the image. When a pedestrian k is detected
+and tracked in consecutive images (Section III.C), the pixel
+values within the detection bounding box Bk are averaged
+to measure the mean distance (davg) of the pedestrian from
+the camera. Let the centroid of the bounding box Bk be
+denoted as [xBk, yBk]. Then, the angular displacement ψ of
+the pedestrian with respect to the robot can be calculated as:
+ψ =
+xBk
+w
+
+∗FOVcam,
+(6)
+where FOVcam is the ﬁeld of view angle of the camera.
+The pedestrian’s position with respect to the robot can be
+calculated as [pped
+x
+, pped
+y
+] = davg * [cos ψ, sin ψ]. A pedes-
+trian’s orientation unit vectors [uped
+x
+, uped
+y
+] can be computed
+by calculating the difference between the pedestrian posi-
+tions computed between two consecutive depth images. The
+pedestrian’s perceived space in front of the pedestrian (S)
+can be trivially calculated based on the computed relative
+positions of all the pedestrians in the robot’s sensing region.
+Using S, the pedestrian’s walking speed vped is calculated
+based on Equation 2.
+C. Classifying Potentially Freezing Pedestrians
+To predict if the freezing scenario discussed in Section
+IV.A could occur, our navigation algorithm ﬁrst identiﬁes
+the pedestrians in its sensing region who could cause such
+freezing behavior and classify them as potentially-freezing.
+To this end, the sensing region Srob of the robot is divided
+equally along the robot’s X-axis as Srob
+right and Srob
+left as shown
+in Fig. 3(b). Consider a pedestrian in the sensing region of
+the robot with an orientation denoted by u = [uped
+x
+, uped
+y
+].
+The pedestrian’s velocity vector vped with respect to the
+robot’s frame, can be obtained by scaling u by the pedestrian
+walking speed vped (from Equation 2) as
+vped = [vped
+x
+, vped
+y
+] = vped ∗[uped
+x
+, uped
+y
+].
+Let the robot speed be vrob. Therefore, its velocity vector
+with respect to its local coordinate frame will be vrob =
+vrob ∗[1, 0]. A pedestrian positioned at pped ∈Srob
+right is
+considered as potentially-freezing if its velocity vector vped
+
+
+===== PAGE 5 =====
+
+satisﬁes these constraints:
+vped
+x
+∈[−vped/
+√
+2, vped/
+√
+2],
+vped
+y
+∈[vped/
+√
+2, vped].
+(7)
+Similarly, the velocity vectors vped of a pedestrian positioned
+at pped
+∈Srob
+left is considered potentially-freezing if it
+satisﬁes:
+vped
+x
+∈[−vped/
+√
+2, vped/
+√
+2],
+vped
+y
+∈[−vped, −vped/
+√
+2].
+(8)
+The pedestrian’s speed is assumed to be comparable to the
+robot’s speed in both cases (vped ∼vrob).
+Proposition IV.1. The distance function (dist()) between any
+pedestrian with a velocity vector that satisﬁes the conditions
+in equations 7 or 8 and the robot, is a decreasing function
+with time.
+Proof. Consider pped
+∈
+Srob
+right with a velocity vector
+[vped
+x
+, vped
+y
+] that satisﬁes Equation 7. From Fig.3(b), we
+observe that pped
+x
+is positive and pped
+y
+is negative. For
+simplicity, let us assume that for a time interval [t0, tfin],
+vped = vrob. Let tfin −t0 = ∆t be a small time interval
+comparable to the time taken for the depth camera to capture
+two consecutive images. In this time interval, with respect to
+the robot, the pedestrian would have moved from (pped
+x
+, pped
+y
+)
+to
+(pped
+x
++ vped
+x
+∆t −vrob∆t, pped
+y
++ vped
+y
+∆t).
+(9)
+Since ∆t is small, there cannot be any sudden changes
+in the pedestrian’s motion. Since vped = vrob, vped
+x
+∈
+[−vped/
+√
+2, vped/
+√
+2]
+=⇒
+vped
+x
+< vrob and vped
+y
+∈
+[vped/
+√
+2, vped] =⇒vped
+y
+> 0. Then, the distance between
+the robot and the pedestrian at t0 is given as,
+d0 =
+q
+(pped
+x
+)2 + (pped
+y
+)2.
+(10)
+The distance between the robot and the pedestrian at tf is
+given as,
+df =
+q
+(pped
+x
++ vped
+x
+∆t −vrob∆t)2 + (pped
+y
++ vped
+y
+∆t)2.
+(11)
+Since vped
+x
+∆t −vrob∆t < 0 and |pped
+y
++ vped
+y
+∆t| < |pped
+y
+|,
+we get df < d0
+=⇒
+dist(orob, pped) is a decreasing
+function in [t0, tfin]. A similar proof can be formulated for
+a pedestrian in Srob
+left. This result implies that the pedestrian
+velocities satisfying conditions 7 and 8 move closer the robot,
+potentially causing freezing. Their motion would also be
+affected the most by the robot’s navigation. Therefore, such
+pedestrians should be classiﬁed as potentially-freezing.
+■
+Pedestrian Classiﬁcation: The potentially-freezing velocity
+directions for each half of the sensing region are shown in
+Fig. 3(b). If vped < vrob, then the pedestrian is considered
+as potentially-freezing, irrespective of his/her orientation, as
+the distance between the robot and the pedestrian decreases
+over time. Pedestrians with velocity vectors of the form
+[±vped, 0], are cases where the pedestrian is either moving
+head-on towards the robot or moving away from the robot
+(maybe at a lower speed than the robot). Such pedestrians
+are also considered potentially-freezing provided that the
+pedestrian position is along the X-axis of the robot. All other
+pedestrians are considered as non-freezing. All potentially-
+freezing pedestrians’ positions are involved in freezing zone
+computation.
+D. Constructing the Potential Freezing Zone
+Deﬁnition IV.2 (Potential Freezing Zone (PFZ)). PFZ is
+deﬁned as a conservative region with a high probability
+for the occurrence of FRP, after a time interval ∆t. Using
+the current position and velocity of a potentially-freezing
+pedestrian i, we predict his/her’s position ˆpped
+i
+after ∆t as,
+ˆpped
+i
+= pped
+i
++ vped
+i
+∆t
+i ∈1, 2, ..., K,
+(12)
+where K is the number of potentially-freezing pedestrians in
+the sensing zone. With these predicted positions as vertices,
+a closed region is constructed, as in (Fig. 3(c)),
+PFZ = ConvexHull(ˆpped
+i
+),
+i ∈1, 2, ..., K.
+(13)
+We use the convex hull of ˆpped
+i
+as a conservative approxi-
+mation because it simpliﬁes the computation of the freezing
+zone. It also simpliﬁes the deviation angle computation
+explained in Section IV.E. The cases where K = 1 is a
+special case where the PFZ is a single point. To maintain
+sufﬁcient distance from the pedestrian, we construct the PFZ
+as a circle centered around the pedestrian with a ﬁxed radius.
+The avoidance of the PFZ locally guarantees the prevention
+of FRP after time ∆t. In addition, it improves the robot’s
+pedestrian-friendliness with respect to the K pedestrians, as
+the robot’s deviation away from the PFZ ensures that it does
+not navigate obtrusively in-front of the pedestrians.
+E. Calculating Deviation Angle φ
+At any instant, if ˆpped
+i
+of the closest potentially-freezing
+pedestrian i positioned at pped = [pped
+x
+, pped
+y
+] satisﬁes,
+dist(vrob∆t, ˆpped
+i
+) ≤η
+(14)
+(η is the pedestrian comfort distance) and vrob∆t ∈PFZ,
+the robot initializes a deviation from its current velocity
+direction to a new velocity by an angle φ as,
+vrob
+new = Rz,φvrob,
+(15)
+where Rz,φ denotes the rotation matrix for an angle φ about
+the robot’s Z-axis. This deviation is constrained based on the
+relative location of the robot’s goal and avoids navigating in-
+front of the pedestrians. φ can be computed as,
+φ = min(φ1, φ2),
+(16)
+where φ1 and φ2 are given by,
+φ1 =
+argmin
+Rz,φ1vrob∆t/∈P F Z
+ dist(Rz,φ1vrob∆t, grob)
+
+,
+(17)
+φ2 = tan−1(pped
+y
+/pped
+x
+),
+φ2̸ = 0.
+(18)
+If min(φ1, φ2) = φ2, the robot deviates towards the closest
+pedestrian’s current position. Since the pedestrian has a non-
+zero velocity in the interval ∆t, the robot avoids the closest
+pedestrian from behind. If φ2 = 0, we use φ = φ1, which
+denotes the least deviation from the goal.
+
+
+===== PAGE 6 =====
+
+Fig. 4: The maximum possible deviation φ2max occurs, when
+the closest potentially-freezing pedestrian is at [f, ssen/2].
+This proves that φ2 is always bounded, which implies that
+φ = min(φ1, φ2) is bounded.
+Proposition IV.2. The deviation angle φ has an upper bound
+of tan−1(±
+p
+η2 −f 2/f) which depends on η and f.
+Proof. Consider the formulation for φ2. For the dimensions
+of the sensing region shown in Fig. 3(a), the maximum value
+of the deviation angle for a certain η could occur if the
+closest pedestrian is located at pped with pped
+x
+= f meter
+(just within the sensing region), and pped
+y
+= ±
+p
+η2 −f 2
+(see Fig. 4). This is because the tan−1(pped
+y
+/pped
+x
+) func-
+tion increases as pped
+x
+decreases, and f is the least possi-
+ble value that pped
+x
+can have. Then, the maximum value
+of φ2, φ2max = tan−1(±
+p
+η2 −f 2/f). φ2 is bounded
+by tan−1(±
+p
+η2 −f 2/f)
+=⇒
+φ is bounded by
+tan−1(±
+p
+η2 −f 2/f).
+■
+The constraints on the deviation angle ensure that (i) PFZ can
+be avoided which reduces freezing and improves pedestrian-
+friendliness; (ii) since φ is the least possible deviation away
+from the PFZ, the angular motion of the robot is restricted.
+This results in minimizing the loss of line of sight of the
+obstacles that are surrounding the robot. We note that our
+deviation angle computation does not assume pedestrian
+cooperation for collision avoidance. This formulation is
+applicable in moderate to dense crowds (≤1 person/ m2),
+where human cooperation is not required to avoid freezing.
+F. Frozone and Deep Reinforcement Learning
+We use a hybrid combination of a DRL-based collision
+avoidance policy by Long et al [16] and Frozone to compute
+the robot’s collision-free velocities. The overall system archi-
+tecture is shown in Fig. 5. Frozone modiﬁes the velocities
+computed by the DRL policy to preemptively avoid potential
+freezing zones in crowds with lower pedestrian densities
+(≤1 person/m2). In dense crowds, the DRL-based policy
+demonstrates good collision avoidance capability, and the
+computed velocities are used directly by our hybrid method.
+The crowd density in the environment is categorized based
+on the total number of pedestrians in the robot’s sensing
+region T. Our switching mechanism for different densities
+can be expressed as:
+vrob =
+(
+vF rozone
+if T ≤s2
+sen,
+vDRL
+if T > s2
+sen.
+(19)
+T ≤s2
+sen corresponds to a density of ≤1person/m2. We
+also note that Frozone is not restricted to be interfaced with a
+Fig. 5: Our hybrid method’s system architecture, which uses
+the velocity provided by a DRL method [16] as a guiding
+velocity for collision avoidance and modiﬁes it to preemp-
+tively avoid Potential Freezing Zones (PFZ). Our method
+includes 3 main components: 1. Classifying pedestrians
+as potentially-freezing and non-freezing; 2. Constructing a
+Potential Freezing Zone; 3. Avoiding the PFZ in a pedestrian-
+friendly manner.
+DRL-based method and can be employed with any collision
+avoidance scheme.
+V. RESULTS AND ANALYSIS
+In this section, we describe our implementation and high-
+light its performance in different evaluation scenarios. We
+also compare our method with prior methods and show
+signiﬁcant improvements in terms of navigation performance.
+A. Implementation
+We ﬁrst evaluate our method in simulations that were
+created using ROS Kinetic and Gazebo 8.6. We use a
+simulated model of a Clearpath Jackal robot attached with
+models of the Hokuyo 2-D lidar and the Orbbec Astra
+depth camera in Gazebo. The Hokuyo lidar, used by the
+DRL-based method, has a range of 4 meters, an FOV of
+240◦, and provides 512 range values per scan. The Astra
+camera has a minimum and maximum sensing range of 0.5
+meters and 5 meters, respectively. We use images of size
+w × h = 150 × 120 with added Gaussian noise N(0, 0.2)
+as inputs to our pedestrian detection and tracking system.
+For our real-world implementation, we mount use different
+cameras; the Astra camera with a Turtlebot 2 and an Intel
+Realsense depth camera with a Clearpath Jackal robot .
+B. Testing Scenarios
+We recreate typical indoor and outdoor scenarios that the
+robot could face in our simulator to evaluate the performance
+of our algorithm and to compare with prior approaches.
+For sparse crowds, we assume that the robot takes full
+responsibility to avoid the collisions. As a result, we make
+no assumptions about human cooperation. We consider the
+following challenging scenarios to evaluate the performance:
+Corridor: The robot must navigate through 15 pedestrians
+in a straight corridor to reach its goal. The scenario is made
+more challenging by making the pedestrians walk in multiple
+pairs or in a zig-zag manner.
+Crossing: The robot must move perpendicular to the pedes-
+trian motion in a plus-shaped corridor. The pedestrians may
+not be sensed until they are very close to the robot.
+
+
+===== PAGE 7 =====
+
+Random-5: The robot must navigate in a random manner
+and move through ﬁve pedestrians that result in high pedes-
+trian density in a local region. The maximum pedestrian
+density in this scenario is 1 person / m2.
+Random-10: The robot navigates through randomly moving
+10 pedestrians. The maximum density however, is < 0.75
+person / m2. This scenario is used to evaluate the maximum
+number of pedestrians that each method can handle at any
+time instant.
+1 Pedestrian Head-on: To compare the reduction in the oc-
+currence of freezing and increase in pedestrian-friendliness,
+we make the robot approach a single pedestrian head-on from
+different initial positions that are at a distance of 3 meters
+and 4 meters. The pedestrian moves at 1 m/s towards the
+robot and halts in-front of the robot, emulating a freezing
+scenario in dense crowds. This tests the collision avoidance
+response time of each algorithm, and if the algorithm can
+avoid freezing.
+1 pedestrian Perpendicular: The robot moves perpendicular
+to a pedestrian’s motion. We evaluate if the robot avoids the
+pedestrian from front (obtrusive) or back (unobtrusive).
+We use the above mentioned single pedestrian scenarios
+for our evaluating freezing rates and pedestrian-friendliness,
+as it provides a more precise way to measure these param-
+eters and observe robot behaviors when compared to more
+dense scenes.
+C. Evaluation Metrics
+We highlight the various metrics used to evaluate the
+algorithm. The mean time and velocity are self-explanatory
+and correspond to the values when the robot reached its goal
+position without a collision.
+Success Rate - The number of times that the robot reached
+its goal without collisions over the total number of attempts.
+Freezing Rate - The number of times the robot got
+stuck or started oscillating for more than 10 seconds, while
+avoiding obstacles over the total number of attempts.
+Pedestrian friendliness - We use Equation 3 to compute
+the pedestrian friendliness metric. We use N∞= 10 in our
+results.
+D. Analysis
+Table I shows the results of our comparisons between
+Frozone + Long et al. [16] DRL method (hybrid) and three
+previous methods in our simulator: (i) Dynamic Window
+Approach [12], a traditional collision avoidance method
+which uses the lidar to sense nearby obstacles and forward-
+simulate the robot’s motion to detect potential collisions, (ii)
+Long et al. [16], a DRL-based collision avoidance method
+for dense crowd collision avoidance; (iii) DenseCAvoid [7],
+a DRL-based method with a trained policy that reduces
+FRP using pedestrian tracking and prediction. As mentioned
+before, our implementation of Frozone is combined with
+Long et al’s DRL policy [16] for our evaluations.
+We observe that Frozone + Long et al’s method has the
+best success rates of all the methods in all the scenarios
+highlighted above. It signiﬁcantly improves the success rates
+over just using Long et al.’s [16] algorithm, and performs
+better or comparably with DWA. This is because a robot’s
+success rate is closely tied to avoiding freezing as well.
+Our hybrid method improves the mean time to goal when
+Fig. 6: The trajectories of our Frozone + Long et al’s method
+hybrid (in green) when compared with the trajectories of
+previous methods (red trajectories). Our method always
+avoids the PFZ (red circular region constructed around
+the pedestrian) and thus avoids freezing. Our method also
+avoids the pedestrian from behind, thereby not affecting the
+pedestrian’s motion. The yellow point represents the robot’s
+goal.
+compared to Long et al.’s method by up to 33%, and the
+robot’s average velocity increases up to 40 %, while resulting
+in comparable performances with the other methods.
+Freezing and Pedestrian-Friendliness: Frozone signif-
+icantly reduces the freezing in all our challenging test
+scenarios. In the scenario where a pedestrian approaches
+the robot head-on starting from 3 meters away, all previous
+methods halted to avoid a collision and started oscillating
+for more than 15 seconds. Frozone + Long et al’s method
+avoids the circular PFZ constructed around the pedestrian
+preemptively and prevents freezing. When the pedestrian
+starts from 4 meters away, DWA and DenseCAvoid manage
+to not freeze in some cases, since the robot has more space
+and time to react to the pedestrian, and avoid it. Both these
+methods however, do not handle dynamic pedestrians in close
+proximity (< 2 meters away).
+Frozone also deviates the robot to avoid pedestrians from
+behind whenever it results in least deviation from the goal.
+When the robot moves perpendicular to the pedestrian’s
+motion, all previous methods take short-sighted actions and
+try to pass the pedestrian from the front. In some cases,
+DWA deviated more than 5 meters away from the goal to
+avoid the pedestrian. Such behavior severely affects both the
+pedestrian-friendliness and the efﬁciency of the navigation.
+In all our trials, Frozone + Long et al’s method passed
+the pedestrian from behind, without changing the perceived
+space in-front of the pedestrian.
+In our real-world tests on two differential drive robots, we
+observed that the robot could switch between the velocities
+computed by Long et al’s method, and Frozone seamlessly.
+The performance in real-world scenarios is also simpliﬁed as
+humans generally cooperate with avoiding collisions with the
+robots. We also test the pedestrian-friendliness improvement
+in real-world scenes and observe that the robot conservatively
+navigates behind a pedestrian whenever possible (please see
+submitted video).
+VI. CONCLUSIONS, LIMITATIONS AND FUTURE WORK
+We present a novel method to signiﬁcantly reduce the
+occurrence of the Freezing Robot Problem when a robot
+navigates through moderately dense crowds. Our approach is
+general and uses a standard camera for pedestrian detection
+and tracking. We present a simple algorithm to construct a
+
+
+===== PAGE 8 =====
+
+TABLE I:
+Comparison of the hybrid combination of Frozone +
+Long et al’s method’s performance with other learning methods
+[16], [7], and a traditional collision avoidance method DWA [12]
+in challenging scenarios. We observe that our hybrid combination’s
+performance is better or comparable to previous methods. We
+represent our hybrid combination as Frozone + DRL in the table.
+Metrics
+Method
+Corridor
+Crossing
+Random-5
+Random-10
+Success
+Rate
+(higher
+better)
+DWA [12]
+0.4
+0.6
+0.6
+0.8
+Long et al. [16]
+0.1
+0.4
+0.6
+0.2
+DenseCAvoid [7]
+0.2
+0.6
+0.7
+0.4
+Frozone + DRL
+0.6
+0.8
+0.6
+0.8
+Mean
+Time
+(lower
+better)
+DWA [12]
+32.9
+31.9
+33.25
+32.71
+Long et al. [16]
+35.4
+39.2
+31.3
+33.8
+DenseCAvoid [7]
+32.03
+39.08
+32.77
+30.04
+Frozone +DRL
+31.3
+29.06
+32.8
+32.2
+Avg
+Velocity
+(higher
+better)
+DWA [12]
+0.30
+0.31
+0.31
+0.30
+Long et al. [16]
+0.28
+0.25
+0.30
+0.33
+DenseCAvoid [7]
+0.33
+0.25
+0.31
+0.33
+Frozone + DRL
+0.34
+0.35
+0.33
+0.33
+TABLE II: Comparison of different methods in terms of freezing
+rates and pedestrian-friendliness (PF) for challenging 1-person
+scenarios, when the pedestrian starts at close proximity from the
+robot and moves at 1 m/s. Our Frozone + Long et al’s method
+hybrid (represented as Frozone + DRL) outperforms all previous
+methods, with a signiﬁcant decrease in freezing and increase in
+pedestrian-friendliness in all scenarios.
+Metrics
+Method
+1Ped-3m
+1Ped-4m
+Ped-perp-3m
+Ped-perp-4m
+Freezing
+Rate
+(lower
+better)
+DWA [12]
+100
+87
+11
+0
+Long et al. [16]
+100
+100
+23
+11
+DenseCAvoid [7]
+100
+81
+5
+0
+Frozone + DRL
+0
+0
+0
+0
+PF
+(higher
+better)
+DWA [12]
+0.0
+0.35
+1.02
+1.5
+Long et al. [16]
+0.0
+0.0
+0.57
+0.95
+DenseCAvoid [7]
+0.0
+0.24
+0.56
+1.32
+Frozone + DRL
+0.36
+0.52
+10
+10
+spatial zone, where the robot could freeze and be obtrusive
+to the pedestrians. We use this formulation of potentially
+freezing zone to compute an angle to deviate the robot away
+from the zone. We also combined our method with a DRL-
+based collision avoidance method to exploit its advantages
+in dense crowds (>1-2 persons/meter2), while reducing
+the occurrence of freezing. We observe that our method
+outperforms existing collision avoidance methods by having
+lower freezing rates, higher pedestrian-friendliness and suc-
+cess rates of reaching the goal. We highlight the performance
+on two different robots.
+Our approach has certain limitations. While our method
+can reduce the rate of freezing, but we cannot avoid it
+altogether without human cooperation. Our formulation of
+potentially freezing zone is conservative and we use a locally
+optimal technique to compute the deviation. The behavior of
+our approach is also governed by the underlying pedestrian
+tracking algorithm as well as the techniques used to model
+pedestrian friendliness. Our hybrid method’s performnce is
+also governed by the DRL formulation. As part of future
+work, we would like to overcome these limitations and test
+our approach with other robots. We would also like to take
+into account the dynamics constraints of the robot.
+REFERENCES
+[1] S. Narang, A. Best, S. Curtis, and D. Manocha, “Generating pedestrian
+trajectories consistent with the fundamental diagram based on physio-
+logical and psychological factors,” PLOS ONE, vol. 10, p. e0117856,
+04 2015.
+[2] A. Bera, T. Randhavane, R. Prinja, and D. Manocha, “Sociosense:
+Robot navigation amongst pedestrians with social and psychological
+constraints,” in 2017 IEEE/RSJ International Conference on Intelligent
+Robots and Systems (IROS), Sep. 2017, pp. 7018–7025.
+[3] Y. F. Chen, M. Everett, M. Liu, and J. How, “Socially aware motion
+planning with deep reinforcement learning,” 09 2017, pp. 1343–1350.
+[4] P. Trautman and A. Krause, “Unfreezing the robot: Navigation in
+dense, interacting crowds,” in 2010 IEEE/RSJ International Confer-
+ence on Intelligent Robots and Systems, Oct 2010, pp. 797–803.
+[5] P. Trautman, J. Ma, R. M. Murray, and A. Krause, “Robot navigation
+in dense human crowds: Statistical models and experimental studies
+of human–robot cooperation,” The International Journal of Robotics
+Research, vol. 34, no. 3, pp. 335–356, 2015. [Online]. Available:
+https://doi.org/10.1177/0278364914557874
+[6] A. Rudenko, L. Palmieri, and K. O. Arras, “Predictive planning for a
+mobile robot in human environments,” in Proceedings of the Workshop
+on AI Planning and Robotics: Challenges and Methods (at ICRA
+2017), Singapore, 2017.
+[7] A. J. Sathyamoorthy, J. Liang, U. Patel, T. Guan, R. Chandra, and
+D. Manocha, “Densecavoid: Real-time navigation in dense crowds
+using anticipatory behaviors,” 2020.
+[8] T. Fan, X. Cheng, J. Pan, P. Long, W. Liu, R. Yang, and D. Manocha,
+“Getting robots unfrozen and unlost in dense pedestrian crowds,” IEEE
+Robotics and Automation Letters, vol. PP, pp. 1–1, 01 2019.
+[9] J. van den Berg, Ming Lin, and D. Manocha, “Reciprocal velocity
+obstacles for real-time multi-agent navigation,” in 2008 IEEE Interna-
+tional Conference on Robotics and Automation, May 2008, pp. 1928–
+1935.
+[10] J. P. van den Berg, S. J. Guy, M. C. Lin, and D. Manocha, “Reciprocal
+n-body collision avoidance,” in ISRR, 2009.
+[11] J. Alonso-Mora, A. Breitenmoser, M. Ruﬂi, P. A. Beardsley, and
+R. Siegwart, “Optimal reciprocal collision avoidance for multiple non-
+holonomic robots,” in DARS, 2010.
+[12] D. Fox, W. Burgard, and S. Thrun, “The dynamic window approach
+to collision avoidance,” IEEE Robotics Automation Magazine, vol. 4,
+no. 1, pp. 23–33, March 1997.
+[13] C. Chen, Y. Liu, S. Kreiss, and A. Alahi, “Crowd-robot interaction:
+Crowd-aware robot navigation with attention-based deep reinforce-
+ment learning,” in ICRA.
+IEEE, 2019, pp. 6015–6022.
+[14] Y. F. Chen, M. Liu, M. Everett, and J. P. How, “Decentralized non-
+communicating multiagent collision avoidance with deep reinforce-
+ment learning,” in ICRA.
+IEEE, 2017, pp. 285–292.
+[15] M. Everett, Y. F. Chen, and J. P. How, “Motion planning among
+dynamic, decision-making agents with deep reinforcement learning,”
+in IROS.
+IEEE, 2018, pp. 3052–3059.
+[16] P. Long, T. Fan, X. Liao, W. Liu, H. Zhang, and J. Pan, “Towards
+Optimally Decentralized Multi-Robot Collision Avoidance via Deep
+Reinforcement Learning,” arXiv e-prints, p. arXiv:1709.10082, Sep
+2017.
+[17] L. Tai, J. Zhang, M. Liu, and W. Burgard, “Socially compliant navi-
+gation through raw depth inputs with generative adversarial imitation
+learning,” in ICRA, May 2018, pp. 1111–1117.
+[18] P. Trautman, J. Ma, R. M. Murray, and A. Krause, “Robot navigation
+in dense human crowds: the case for cooperation,” in 2013 IEEE
+International Conference on Robotics and Automation, May 2013, pp.
+2153–2160.
+[19] C. Yu and C. Wang, “Collision- and freezing-free navigation in
+dynamic environments using learning to search,” in 2012 Conference
+on Technologies and Applications of Artiﬁcial Intelligence, Nov 2012,
+pp. 151–156.
+[20] T. Fan, P. Long, W. Liu, and J. Pan, “Fully Distributed Multi-
+Robot Collision Avoidance via Deep Reinforcement Learning for Safe
+and Efﬁcient Navigation in Complex Scenarios,” arXiv e-prints, p.
+arXiv:1808.03841, Aug 2018.
+[21] B. L¨otjens, M. Everett, and J. P. How, “Safe reinforcement learning
+with model uncertainty estimates,” in 2019 International Conference
+on Robotics and Automation (ICRA), May 2019, pp. 8662–8668.
+[22] A. Best, S. Narang, S. Curtis, and D. Manocha, “Densesense: Interac-
+tive crowd simulation using density-dependent ﬁlters,” in Proceedings
+of the ACM SIGGRAPH/Eurographics Symposium on Computer Ani-
+mation.
+Eurographics Association, 2014, pp. 97–102.
+[23] A. Bera, T. Randhavane, A. Wang, D. Manocha, E. Kubin, and
+K. Gray, “Classifying group emotions for socially-aware autonomous
+vehicle navigation,” in The IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR) Workshops, June 2018.
+[24] Y. F. Chen, M. Everett, M. Liu, and J. How, “Socially aware motion
+planning with deep reinforcement learning,” 09 2017, pp. 1343–1350.
+[25] J. Redmon and A. Farhadi, “Yolov3: An incremental improvement,”
+arXiv preprint arXiv:1804.02767, 2018.
+
+
+===== PAGE 9 =====
+
+[26] R. Chandra, U. Bhattacharya, A. Bera, and D. Manocha, “Densepeds:
+Pedestrian tracking in dense crowds using front-rvo and sparse fea-
+tures,” arXiv preprint arXiv:1906.10313, 2019.
