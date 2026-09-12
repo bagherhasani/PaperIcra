@@ -1,0 +1,21 @@
+# Related papers (put PDFs here)
+
+Download PDFs into this folder. Suggested filenames:
+
+01_Trautman_Krause_IROS2010_Unfreezing_the_Robot.pdf
+02_Trautman_et_al_ICRA2013_Dense_Crowds_Cooperation.pdf
+03_Schneider_Gavrila_GCPR2013_Pedestrian_Path_Prediction_EKF.pdf
+04_Schubert_et_al_FUSION2008_Motion_Models_CTRV.pdf
+05_Sisbot_et_al_TRO2007_Human_Aware_Motion_Planner.pdf
+06_Lu_et_al_IROS2014_Layered_Costmaps.pdf
+07_Lewandowski_et_al_IROS2019_Deep_Orientation.pdf
+08_Flohr_et_al_IV2014_Head_Body_Orientation.pdf
+09_HuMAN_MPC_ICRA2024_LHMP_Workshop.pdf
+10_Poddar_et_al_2023_Prediction_to_Navigation.pdf
+11_Chen_et_al_ICRA2019_SARL.pdf
+12_STP4_PeerJ2023_SpatioTemporal_Path_Planning.pdf
+
+Optional extras (13–15):
+13_Helbing_Molnar_1995_Social_Force.pdf
+14_Kirby_et_al_ROMAN2009_COMPANION.pdf
+15_Fox_et_al_DWA_dynamic_window.pdf

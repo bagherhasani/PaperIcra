@@ -1,13 +1,16 @@
 import os
 import sys
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from test_config import TEST_NAME
 
-CSV_PATH = f"ekf_prediction_log_{TEST_NAME}.csv"
-DASHBOARD_PATH = f"ekf_eval_dashboard_{TEST_NAME}.png"
+RESULTS_DIR = Path(__file__).resolve().parent / "results"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+CSV_PATH = str(RESULTS_DIR / f"ekf_prediction_log_{TEST_NAME}.csv")
+DASHBOARD_PATH = str(RESULTS_DIR / f"ekf_eval_dashboard_{TEST_NAME}.png")
 
 if not os.path.exists(CSV_PATH):
     print(f"CSV not found: {CSV_PATH}  — run zed2.py first.")

@@ -7,9 +7,13 @@
 import pyzed.sl as sl
 import cv2
 import numpy as np
+from pathlib import Path
 from test_config import TEST_NAME, MOTION_MODEL, STEERING_GAIN_B, SVO_PATH, PROFIDEA2_ALPHA, PROFIDEA2_BETA, PROFIDEA3_K
 
-LOG_CSV = f"ekf_prediction_log_{TEST_NAME}.csv"
+# Logs/plots live in results/ (same folder layout on Jetson after git pull)
+RESULTS_DIR = Path(__file__).resolve().parent / "results"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+LOG_CSV = str(RESULTS_DIR / f"ekf_prediction_log_{TEST_NAME}.csv")
 
 
 # ============================================================
