@@ -8,7 +8,35 @@ import pyzed.sl as sl
 import cv2
 import numpy as np
 from pathlib import Path
-from test_config import TEST_NAME, MOTION_MODEL, STEERING_GAIN_B, SVO_PATH, PROFIDEA2_ALPHA, PROFIDEA2_BETA, PROFIDEA3_K
+from test_config import (
+    TEST_NAME,
+    MOTION_MODEL,
+    STEERING_GAIN_B,
+    SVO_PATH,
+    PROFIDEA2_ALPHA,
+    PROFIDEA2_BETA,
+    PROFIDEA3_K,
+)
+try:
+    from test_config import GONZALEZ_K
+except ImportError:
+    GONZALEZ_K = 0.5
+try:
+    from test_config import LATERAL_LP_ALPHA
+except ImportError:
+    LATERAL_LP_ALPHA = 0.15
+try:
+    from test_config import SPEED_EMA_ALPHA
+except ImportError:
+    SPEED_EMA_ALPHA = 0.25
+try:
+    from test_config import PRED_MIN_SPEED
+except ImportError:
+    PRED_MIN_SPEED = 0.30
+try:
+    from test_config import EVAL_SKIP_S
+except ImportError:
+    EVAL_SKIP_S = 2.0
 
 # Logs/plots live in results/ (same folder layout on Jetson after git pull)
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -48,6 +76,24 @@ def get_velocity_heading(velocity):
     heading = normalize_angle(heading)
 
     return heading
+
+
+def get_mid_hip_position_ekf(keypoint_3d, fallback_position):
+    """
+    Waist / mid-hip landmark in EKF coords (px=forward/z, py=lateral/x).
+    Matches González-style body landmark better than full-body COM.
+    BODY_18: right hip=8, left hip=11.
+    """
+    if keypoint_3d is None or len(keypoint_3d) < 12:
+        return float(fallback_position[2]), float(fallback_position[0])
+
+    right_hip = keypoint_3d[8]
+    left_hip = keypoint_3d[11]
+    if np.any(np.isnan(right_hip)) or np.any(np.isnan(left_hip)):
+        return float(fallback_position[2]), float(fallback_position[0])
+
+    mid = 0.5 * (np.asarray(right_hip, dtype=float) + np.asarray(left_hip, dtype=float))
+    return float(mid[2]), float(mid[0])
 
 
 def get_hip_heading_body18(keypoint_3d, velocity):
@@ -370,6 +416,7 @@ def main():
     # EKF variables
     ekf = None
     previous_timestamp = None
+    filter_t0 = None  # first EKF timestamp; used with EVAL_SKIP_S
     seconds_ahead = 1.0
     rviz_ahead = 2.0
 
@@ -447,8 +494,13 @@ def main():
                     # EKF measurement
                     # -----------------------------
 
-                    measured_px = position[2]   # forward/backward
-                    measured_py = position[0]   # left/right
+                    if MOTION_MODEL == "hip_gait":
+                        measured_px, measured_py = get_mid_hip_position_ekf(
+                            keypoint, position
+                        )
+                    else:
+                        measured_px = position[2]   # forward/backward
+                        measured_py = position[0]   # left/right
 
                     measured_heading = get_hip_heading_body18(
                         keypoint,
@@ -481,6 +533,7 @@ def main():
                         )
 
                         if ekf is None:
+                            filter_t0 = current_timestamp
                             ekf = Ekf(
                                 measured_px,
                                 measured_py,
@@ -493,6 +546,10 @@ def main():
                                 profidea2_alpha=PROFIDEA2_ALPHA,
                                 profidea2_beta=PROFIDEA2_BETA,
                                 profidea3_k=PROFIDEA3_K,
+                                gonzalez_k=GONZALEZ_K,
+                                lateral_lp_alpha=LATERAL_LP_ALPHA,
+                                speed_ema_alpha=SPEED_EMA_ALPHA,
+                                pred_min_speed=PRED_MIN_SPEED,
                             )
 
                         px, py, speed, heading, heading_rate = ekf.process_measurement(
@@ -505,7 +562,7 @@ def main():
                         future_px, future_py = ekf.predictFuture(seconds_ahead)
                         rviz_px, rviz_py = ekf.predictFuture(rviz_ahead)
 
-                        # Live RViz: blue dot = now, red arrow = +2 s
+                        # Live RViz + Nav2 cloud: now, +2s arrow, +1s costmap
                         if danger_zone is not None:
                             try:
                                 danger_zone.publish(
@@ -521,16 +578,22 @@ def main():
 
                         # -----------------------------
                         # Store prediction for later evaluation
+                        # (skip warm-up: only score after EVAL_SKIP_S)
                         # -----------------------------
 
-                        prediction_buffer.append({
-                            "target_time": current_timestamp + seconds_ahead,
-                            "pred_px": future_px,
-                            "pred_py": future_py,
-                            "speed": speed,
-                            "heading": heading,
-                            "heading_rate": heading_rate
-                        })
+                        filter_age = (
+                            0.0 if filter_t0 is None
+                            else current_timestamp - filter_t0
+                        )
+                        if filter_age >= EVAL_SKIP_S:
+                            prediction_buffer.append({
+                                "target_time": current_timestamp + seconds_ahead,
+                                "pred_px": future_px,
+                                "pred_py": future_py,
+                                "speed": speed,
+                                "heading": heading,
+                                "heading_rate": heading_rate
+                            })
 
                         # -----------------------------
                         # Evaluate old predictions

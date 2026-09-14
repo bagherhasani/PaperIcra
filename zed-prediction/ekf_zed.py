@@ -8,7 +8,11 @@ class Ekf:
                  motion_model="ctrv", steering_gain_b=3.0,
                  profidea2_alpha=0.05, profidea2_beta=1.5,
                  profidea3_k=0.35,
-                 hip_gate_speed=0.3, hip_gate_sin=0.25):
+                 hip_gate_speed=0.3, hip_gate_sin=0.25,
+                 gonzalez_k=0.5,
+                 lateral_lp_alpha=0.15,
+                 speed_ema_alpha=0.25,
+                 pred_min_speed=0.30):
 
         self.initial_px = initial_px
         self.initial_py = initial_py
@@ -21,6 +25,22 @@ class Ekf:
         self.hip_gate_speed = hip_gate_speed
         self.hip_gate_sin = hip_gate_sin
         self.hip_heading = initial_heading
+        # González Sensors 2022 eq.(13): φ̃ = K·φ_hip + (1−K)·φ_path
+        self.gonzalez_k = float(gonzalez_k)
+        self.lateral_lp_alpha = float(np.clip(lateral_lp_alpha, 0.01, 1.0))
+        self.speed_ema_alpha = float(np.clip(speed_ema_alpha, 0.01, 1.0))
+        # Open-loop: if v below this, forecast = stay put (no arrow jump).
+        self.pred_min_speed = float(pred_min_speed)
+        self._last_meas_px = float(initial_px)
+        self._last_meas_py = float(initial_py)
+        self._have_last_meas = False
+        self._lp_py = float(initial_py)
+        self._have_lp_py = False
+        self._ema_speed = float(max(initial_speed, 0.0))
+        self._have_ema_speed = False
+        # Fast EMA of displacement speed — open-loop uses min(state, this)
+        self._meas_speed_ema = float(max(initial_speed, 0.0))
+        self._have_meas_speed = False
 
         # Prof idea 2 params
         self.profidea2_alpha = profidea2_alpha
@@ -44,16 +64,16 @@ class Ekf:
             self.initial_heading_rate
         ], dtype=float)
 
-        # Define P: initial uncertainty
+        # Define P: initial uncertainty (tighter = less wild warm-up)
         self.ekf.P = np.array([
-            [1,   0,   0,   0,   0],
-            [0,   1,   0,   0,   0],
-            [0,   0, 100,   0,   0],
-            [0,   0,   0,  10,   0],
-            [0,   0,   0,   0,   5]
+            [0.25, 0,    0,   0,   0],
+            [0,    0.25, 0,   0,   0],
+            [0,    0,    4.0, 0,   0],   # was 100 — speed not totally unknown
+            [0,    0,    0,   1.0, 0],   # was 10
+            [0,    0,    0,   0,   0.5]  # was 5
         ], dtype=float)
 
-        # Define R: measurement noise
+        # Define R: measurement noise (champion values — keep ADE)
         # measurement = [px_zed, py_zed, hip_heading]
         self.ekf.R = np.array([
             [0.1, 0,   0],
@@ -61,7 +81,7 @@ class Ekf:
             [0,   0,   1.0]
         ], dtype=float)
 
-        # Define Q: process noise
+        # Define Q: process noise (champion values — keep ADE)
         # model uncertainty for [px, py, speed, heading, heading_rate]
         self.ekf.Q = np.array([
             [0.01, 0,    0,   0,    0],
@@ -96,6 +116,24 @@ class Ekf:
         if speed < self.hip_gate_speed:
             return False
         return abs(self.hip_steering_dot(heading, self.hip_heading)) >= self.hip_gate_sin
+
+    def blend_headings(self, path_heading, hip_heading, k=None):
+        """Circular form of González φ̃ = K·φ_hip + (1−K)·φ_path."""
+        if k is None:
+            k = self.gonzalez_k
+        k = float(np.clip(k, 0.0, 1.0))
+        c = (1.0 - k) * np.cos(path_heading) + k * np.cos(hip_heading)
+        s = (1.0 - k) * np.sin(path_heading) + k * np.sin(hip_heading)
+        return self.normalize_angle(np.arctan2(s, c))
+
+    def path_heading_from_motion(self, measured_px, measured_py):
+        """Heading of recent displacement (φ_path); falls back to filter θ."""
+        if self._have_last_meas:
+            dx = measured_px - self._last_meas_px
+            dy = measured_py - self._last_meas_py
+            if (dx * dx + dy * dy) > (0.02 * 0.02):
+                return float(np.arctan2(dy, dx))
+        return float(self.ekf.x[3])
 
     def motion_model_hip_steering(self, x):
         """
@@ -354,13 +392,17 @@ class Ekf:
         if self.motion_model_type == "hip_gated":
             if self.should_hip_steer(x[2], x[3]):
                 return self.motion_model_hip_steering(x)
-        elif self.motion_model_type == "hip_steering":
+        elif self.motion_model_type in ("hip_steering", "hip_blend", "hip_gait"):
+            # Filter novelty stays hip-steering; blend/gait extras are measurement-side.
             return self.motion_model_hip_steering(x)
         if self.motion_model_type == "profidea3":
             return self.motion_model_profidea3(x)
         if self.motion_model_type == "profidea2":
             return self.motion_model_profidea2(x)
 
+        return self._motion_model_ctrv(x)
+
+    def _motion_model_ctrv(self, x):
         px           = x[0]
         py           = x[1]
         speed        = x[2]
@@ -394,7 +436,7 @@ class Ekf:
         if self.motion_model_type == "hip_gated":
             if self.should_hip_steer(x[2], x[3]):
                 return self.F_jacobian_hip_steering(x)
-        elif self.motion_model_type == "hip_steering":
+        elif self.motion_model_type in ("hip_steering", "hip_blend", "hip_gait"):
             return self.F_jacobian_hip_steering(x)
         if self.motion_model_type == "profidea3":
             return self.F_jacobian_profidea3(x)
@@ -544,15 +586,60 @@ class Ekf:
         """
 
         self.update_dt(dt)
+        # Keep raw hip for steering novelty.
         self.hip_heading = measured_heading
+
+        z_px = float(measured_px)
+        z_py = float(measured_py)
+        z_heading = measured_heading
+
+        if self.motion_model_type == "hip_gait":
+            # 1) Lateral low-pass (kill step sway in py)
+            a = self.lateral_lp_alpha
+            if not self._have_lp_py:
+                self._lp_py = z_py
+                self._have_lp_py = True
+            else:
+                self._lp_py = a * z_py + (1.0 - a) * self._lp_py
+            z_py = float(self._lp_py)
+
+            # 2) González heading cleanup into z only (process stays hip-steer)
+            path_h = self.path_heading_from_motion(z_px, z_py)
+            z_heading = self.blend_headings(path_h, measured_heading)
+
+        elif self.motion_model_type == "hip_blend":
+            # González Sensors 2022: clean measurement heading before update.
+            path_h = self.path_heading_from_motion(measured_px, measured_py)
+            z_heading = self.blend_headings(path_h, measured_heading)
 
         self.predict()
 
         self.update(
-            measured_px,
-            measured_py,
-            measured_heading
+            z_px,
+            z_py,
+            z_heading
         )
+
+        # Track recent motion speed for open-loop (state v lags on slowdown).
+        if self._have_last_meas and dt > 1e-4:
+            inst = float(
+                np.hypot(z_px - self._last_meas_px, z_py - self._last_meas_py) / dt
+            )
+            a = 0.35  # responsive to braking
+            if not self._have_meas_speed:
+                self._meas_speed_ema = inst
+                self._have_meas_speed = True
+            else:
+                self._meas_speed_ema = a * inst + (1.0 - a) * self._meas_speed_ema
+
+        if self.motion_model_type == "hip_gait":
+            # 3) EMA speed (hold gait pulse) from cleaned displacement
+            if self._have_meas_speed:
+                self.ekf.x[2] = max(self._meas_speed_ema, 0.0)
+
+        self._last_meas_px = float(z_px)
+        self._last_meas_py = float(z_py)
+        self._have_last_meas = True
 
         px = float(self.ekf.x[0])
         py = float(self.ekf.x[1])
@@ -562,27 +649,62 @@ class Ekf:
 
         return px, py, speed, heading, heading_rate
 
+    def _open_loop_speed(self):
+        """Speed used for 1s/2s forecast: respect braking (meas EMA)."""
+        speed = float(self.ekf.x[2])
+        if self._have_meas_speed:
+            speed = min(speed, float(self._meas_speed_ema))
+        if speed < self.pred_min_speed:
+            return 0.0
+        return speed
+
+    def _step_hip_steer(self, px, py, speed, heading, dt_step):
+        steer = (
+            self.steering_gain_b
+            * self.hip_steering_dot(heading, self.hip_heading)
+            * dt_step
+        )
+        heading = self.normalize_angle(heading + steer)
+        px = px + speed * np.cos(heading) * dt_step
+        py = py + speed * np.sin(heading) * dt_step
+        return px, py, heading
+
+    def _step_ctrv(self, px, py, speed, heading, heading_rate, dt_step):
+        heading_new = self.normalize_angle(heading + heading_rate * dt_step)
+        if abs(heading_rate) > 1e-5:
+            px = px + (speed / heading_rate) * (
+                np.sin(heading_new) - np.sin(heading)
+            )
+            py = py + (speed / heading_rate) * (
+                -np.cos(heading_new) + np.cos(heading)
+            )
+        else:
+            px = px + speed * np.cos(heading) * dt_step
+            py = py + speed * np.sin(heading) * dt_step
+        return px, py, heading_new
+
     def _integrate_future_step(self, px, py, speed, heading, heading_rate, dt_step):
         """
         One open-loop integration step for future trajectory prediction.
         """
-        if self.motion_model_type == "hip_gated":
-            if not self.should_hip_steer(speed, heading):
-                heading = self.normalize_angle(heading + heading_rate * dt_step)
-                px = px + speed * np.cos(heading) * dt_step
-                py = py + speed * np.sin(heading) * dt_step
-                return px, py, heading
-            steer = (
-                self.steering_gain_b
-                * self.hip_steering_dot(heading, self.hip_heading)
-                * dt_step
-            )
-            heading = self.normalize_angle(heading + steer)
-            px = px + speed * np.cos(heading) * dt_step
-            py = py + speed * np.sin(heading) * dt_step
-            return px, py, heading
+        if self.motion_model_type == "hip_blend":
+            # Soft mix handled in predictFuture / predictFutureTrajectory.
+            return self._step_hip_steer(px, py, speed, heading, dt_step)
 
-        if self.motion_model_type in ("hip_steering", "profidea3"):
+        if self.motion_model_type == "hip_gated":
+            # Slow / nearly stopped: do not invent motion (Schöller/González).
+            if speed < self.hip_gate_speed:
+                return px, py, heading
+            if not self.should_hip_steer(speed, heading):
+                return self._step_ctrv(
+                    px, py, speed, heading, heading_rate, dt_step
+                )
+            return self._step_hip_steer(px, py, speed, heading, dt_step)
+
+        if self.motion_model_type in ("hip_steering", "profidea3", "hip_gait"):
+            # Near stop: Δp ≈ v·T → 0. Do not steer on noisy hips (arrow jump).
+            if speed < self.pred_min_speed:
+                return px, py, heading
             steer = (
                 self.steering_gain_b
                 * self.hip_steering_dot(heading, self.hip_heading)
@@ -623,9 +745,9 @@ class Ekf:
             heading = heading_new
 
         else:
-            heading = self.normalize_angle(heading + heading_rate * dt_step)
-            px = px + speed * np.cos(heading) * dt_step
-            py = py + speed * np.sin(heading) * dt_step
+            px, py, heading = self._step_ctrv(
+                px, py, speed, heading, heading_rate, dt_step
+            )
 
         return px, py, heading
 
@@ -636,11 +758,32 @@ class Ekf:
 
         px = self.ekf.x[0]
         py = self.ekf.x[1]
-        speed = self.ekf.x[2]
+        speed = self._open_loop_speed()
         heading = self.ekf.x[3]
-        heading_rate = self.ekf.x[4]
+        heading_rate = self.ekf.x[4] if speed > 0.0 else 0.0
+
+        if speed <= 0.0:
+            return float(px), float(py)
 
         dt_step = seconds_ahead / steps
+
+        if self.motion_model_type == "hip_blend":
+            # Soft multi-model: w·hip_steer + (1−w)·CTRV, w=|sin(θ_hip−θ)|
+            w = float(abs(self.hip_steering_dot(heading, self.hip_heading)))
+            w = min(max(w, 0.0), 1.0)
+            px_h, py_h, h_h = float(px), float(py), float(heading)
+            px_c, py_c, h_c = float(px), float(py), float(heading)
+            for _ in range(steps):
+                px_h, py_h, h_h = self._step_hip_steer(
+                    px_h, py_h, speed, h_h, dt_step
+                )
+                px_c, py_c, h_c = self._step_ctrv(
+                    px_c, py_c, speed, h_c, heading_rate, dt_step
+                )
+            return (
+                w * px_h + (1.0 - w) * px_c,
+                w * py_h + (1.0 - w) * py_c,
+            )
 
         for _ in range(steps):
             px, py, heading = self._integrate_future_step(
@@ -657,13 +800,38 @@ class Ekf:
 
         px = self.ekf.x[0]
         py = self.ekf.x[1]
-        speed = self.ekf.x[2]
+        speed = self._open_loop_speed()
         heading = self.ekf.x[3]
-        heading_rate = self.ekf.x[4]
+        heading_rate = self.ekf.x[4] if speed > 0.0 else 0.0
 
         dt_future = seconds_ahead / steps
 
         trajectory = []
+
+        if speed <= 0.0:
+            for _ in range(steps):
+                trajectory.append((float(px), float(py)))
+            return trajectory
+
+        if self.motion_model_type == "hip_blend":
+            w = float(abs(self.hip_steering_dot(heading, self.hip_heading)))
+            w = min(max(w, 0.0), 1.0)
+            px_h, py_h, h_h = float(px), float(py), float(heading)
+            px_c, py_c, h_c = float(px), float(py), float(heading)
+            for _ in range(steps):
+                px_h, py_h, h_h = self._step_hip_steer(
+                    px_h, py_h, speed, h_h, dt_future
+                )
+                px_c, py_c, h_c = self._step_ctrv(
+                    px_c, py_c, speed, h_c, heading_rate, dt_future
+                )
+                trajectory.append(
+                    (
+                        w * px_h + (1.0 - w) * px_c,
+                        w * py_h + (1.0 - w) * py_c,
+                    )
+                )
+            return trajectory
 
         for _ in range(steps):
             px, py, heading = self._integrate_future_step(

@@ -6,6 +6,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from test_config import TEST_NAME
+try:
+    from test_config import EVAL_SKIP_S
+except ImportError:
+    EVAL_SKIP_S = 2.0
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -25,7 +29,7 @@ if len(df) == 0:
 # Time relative to start
 df["time_zero"] = df["time"] - df["time"].iloc[0]
 
-# Key metrics
+# Key metrics (CSV already skips warm-up if zed2 used EVAL_SKIP_S)
 ade   = df["error_1s"].mean()
 fde   = df["error_1s"].iloc[-1]
 max_e = df["error_1s"].max()
@@ -40,6 +44,7 @@ print(f"  FDE  (final displacement error): {fde:.3f} m")
 print(f"  Max error                      : {max_e:.3f} m")
 print(f"  Median error                   : {med_e:.3f} m")
 print(f"  Samples evaluated              : {len(df)}")
+print(f"  (warm-up skip in zed2: {EVAL_SKIP_S:.1f} s)")
 print("=" * 45)
 
 # ── Layout: 3 rows × 2 cols ────────────────────────────────
@@ -175,4 +180,5 @@ ax5.grid(True)
 
 plt.savefig(DASHBOARD_PATH, dpi=150, bbox_inches="tight")
 print(f"Saved: {DASHBOARD_PATH}")
-plt.show()
+# Non-interactive save only (use MPLBACKEND=Agg on headless)
+# plt.show()

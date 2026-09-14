@@ -1,0 +1,64 @@
+========================================
+BLOCK 2 — Nav2 A/B (no more ADE tuning)
+========================================
+
+Locked model: hip_steering, b=3.0
+Switch only: NAV_CLOUD_MODE = "now" | "pred"  in test_config.py
+
+----------------------------------------
+STEP 0 — clean terminals (important)
+----------------------------------------
+  unset LD_LIBRARY_PATH
+  cd ~/ros2_ws
+  ./stop_nav_stack.sh   # if it exists
+  ./start_nav_stack.sh
+
+Wait for RViz + robot. Do NOT set a Nav2 goal yet.
+
+----------------------------------------
+STEP 1 — sanity (mode A = now)
+----------------------------------------
+  Edit test_config.py:
+    NAV_CLOUD_MODE = "now"
+    MOTION_MODEL   = "hip_steering"
+    # SVO_PATH can stay; for live leave camera connected (no SVO) if you use live ZED
+
+  New terminal:
+    unset LD_LIBRARY_PATH
+    source /opt/ros/humble/setup.bash
+    cd ~/ros2_ws/src/zed-detection/zed-prediction
+    python3 zed2.py
+
+  Checks:
+    ros2 topic hz /person/nav_cloud
+    RViz: MarkerArray /person/danger_zone
+    Local costmap: blob on the person (current pose)
+
+PASS when costmap lights up on the person.
+
+----------------------------------------
+STEP 2 — Trial A (now)
+----------------------------------------
+  NAV_CLOUD_MODE = "now"
+  Same hallway, same Nav2 goal, person walks across the path once.
+  Record: time-to-goal (phone stopwatch) + freeze? (Y/N)
+
+----------------------------------------
+STEP 3 — Trial B (pred)
+----------------------------------------
+  Stop zed2.py
+  NAV_CLOUD_MODE = "pred"
+  Restart python3 zed2.py
+  Same goal, same person crossing.
+  Record: time-to-goal + freeze? (Y/N)
+
+----------------------------------------
+STEP 4 — done when
+----------------------------------------
+  Local costmap clearly different A vs B
+  At least one timed A/B pair written down
+
+Photos (optional): RViz costmap A, costmap B — no video required.
+
+Block 1 figures (already made):
+  results/block1_figures/
