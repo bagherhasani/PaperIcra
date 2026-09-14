@@ -5,7 +5,7 @@ PRED_MIN_SPEED = 0.30
 EVAL_SKIP_S = 2.0
 
 # Block 2 A/B switch — start with "now", then flip to "pred"
-NAV_CLOUD_MODE = "now"
+NAV_CLOUD_MODE = "pred"
 
 GONZALEZ_K = 0.5
 LATERAL_LP_ALPHA = 0.15
