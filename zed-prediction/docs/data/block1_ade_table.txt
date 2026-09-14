@@ -1,0 +1,6 @@
+Block 1 — 1 s ADE (full clip, locked SVOs)
+========================================================
+D-walk      Static=0.634  CV=0.256  CTRV=0.203  Hip=0.192  (n≈509)
+Straight    Static=0.800  CV=0.254  CTRV=0.206  Hip=0.198  (n≈204)
+========================================================
+Claim: Hip-steering beats Static / CV / CTRV on these ZED clips.

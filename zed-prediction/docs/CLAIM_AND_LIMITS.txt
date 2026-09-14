@@ -1,0 +1,31 @@
+CLAIM AND LIMITS (do not oversell)
+=================================
+
+ALLOWED CLAIMS
+--------------
+1. Hip-steering EKF uses BODY_18 hip heading with fixed gain b=3.
+2. On D-walk and straight ZED SVO replays, 1 s ADE is lower for hip-steering
+   than CTRV under identical EKF settings (only motion model changes).
+3. Numbers (paper table): D-walk 0.192 vs 0.203 m; straight 0.198 vs 0.206 m.
+4. System can publish a predicted person disc into Nav2 (engineering prototype).
+
+FORBIDDEN / UNSUPPORTED (as of 2026-09-14)
+------------------------------------------
+1. "Prediction makes the robot navigate safer / avoid freezing better than now."
+   → Block 2 A/B logs do not establish this.
+2. Beating González lab ~0.11 m ADE.
+3. Multi-scene / multi-person / dense-crowd evaluation.
+4. Learning-based SOTA comparison (Social-GAN, Trajectron++, etc.).
+5. Claiming 2 s Nav horizon ADE from 1 s eval logs.
+
+RECOMMENDED PAPER SHAPE
+-----------------------
+Title/theme: short-horizon pedestrian forecast from onboard hip orientation.
+Main results: Table I + 1–2 figures from docs/figures/.
+Nav2: one short "integration / future work" paragraph (already in root.tex Limits).
+
+IF REVIEWERS ASK "WHY NO NAV RESULT?"
+------------------------------------
+Honest answer: live costmap integration exists; controlled corridor A/B with
+matched trials was not completed; lidar already observes the person at "now",
+so isolating prediction benefit needs a stricter protocol than we finished.

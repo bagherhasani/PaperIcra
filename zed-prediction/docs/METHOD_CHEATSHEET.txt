@@ -1,0 +1,43 @@
+METHOD CHEATSHEET (for writing without code)
+============================================
+
+Hardware / software
+  ZED stereo + BODY_18 body tracking
+  EKF in ekf_zed.py; live loop zed2.py
+  Evaluation: SVO replay (D-walk, straight)
+
+Coordinates (camera horizontal)
+  px = ZED Z = forward
+  py = ZED X = lateral (camera-right positive in EKF)
+  Hip heading from KP 8 (R hip) and 11 (L hip); flip using velocity if needed
+
+State / measurement
+  x = [px, py, v, theta, omega]^T
+  z = [px, py, theta_hip]^T
+  h(x) = [px, py, theta]^T
+
+CTRV predict (when |omega| large): constant-turn arc; else straight step
+Hip-steering predict:
+  theta <- theta + b * sin(theta_hip - theta) * dt
+  px <- px + v * cos(theta) * dt
+  py <- py + v * sin(theta) * dt
+  b = 3.0  (paper runs)
+  Near-stop: if v < pred_min_speed (0.30), open-loop hip steer disabled in live code
+
+1 s forecast
+  After EKF update, copy state, integrate 20 steps of dt=0.05 s open-loop
+  Score: Euclidean error vs measurement at target time
+  ADE = mean error; FDE in paper = error on last scored frame of log
+
+Covariances (paper draft)
+  P0 = diag(1, 1, 100, 10, 5)
+  Q  = diag(0.01, 0.01, 0.1, 0.05, 0.01)
+  R  = diag(0.1, 0.1, 1.0)
+
+Scenes
+  D-walk: curved / turning path (harder for CTRV)
+  Straight: mostly constant heading
+
+Related citations already in refs.bib
+  Trautman freezing robot, Frozone, Scholler CV, Gonzalez gait/CTRV,
+  Sun 3DOF, Quintero, Unhelkar, Salzmann, UPTor, Lu layered costmaps, Katyal
