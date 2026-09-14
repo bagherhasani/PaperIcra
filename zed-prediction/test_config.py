@@ -1,10 +1,10 @@
-TEST_NAME = "block2_now_sanity"
+TEST_NAME = "block2_B_pred"
 MOTION_MODEL = "hip_steering"
 STEERING_GAIN_B = 3.0
 PRED_MIN_SPEED = 0.30
 EVAL_SKIP_S = 2.0
 
-# Block 2 A/B switch — start with "now", then flip to "pred"
+# Block 2 A/B: Mode B — cloud at +1 s prediction
 NAV_CLOUD_MODE = "pred"
 
 GONZALEZ_K = 0.5

@@ -29,7 +29,8 @@ except ImportError:
     NAV_CLOUD_MODE = "pred"
 
 FRAME = "base_link"
-RADIUS = 0.40
+# ~shoulder half-width; costmap inflation (~0.30) still adds soft margin
+RADIUS = 0.22
 
 
 class DangerZonePublisher:
