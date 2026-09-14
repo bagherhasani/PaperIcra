@@ -37,6 +37,18 @@ try:
     from test_config import EVAL_SKIP_S
 except ImportError:
     EVAL_SKIP_S = 2.0
+try:
+    from test_config import BODY_MIN_CONF, TRACK_LOST_S, CAM_TO_BASE_X, CAM_TO_BASE_Y
+except ImportError:
+    BODY_MIN_CONF = 40
+    TRACK_LOST_S = 1.0
+    CAM_TO_BASE_X = 0.0
+    CAM_TO_BASE_Y = 0.0
+try:
+    from test_config import NAV_PRED_HORIZON, RVIZ_PRED_HORIZON
+except ImportError:
+    NAV_PRED_HORIZON = 2.0
+    RVIZ_PRED_HORIZON = 2.0
 
 # Logs/plots live in results/ (same folder layout on Jetson after git pull)
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -50,6 +62,38 @@ LOG_CSV = str(RESULTS_DIR / f"ekf_prediction_log_{TEST_NAME}.csv")
 
 def normalize_angle(angle):
     return (angle + np.pi) % (2 * np.pi) - np.pi
+
+
+def zed_world_to_camera(xyz_w, cam_pose):
+    """
+    Body/keypoint in ZED WORLD → camera frame.
+    cam_pose = camera pose in WORLD (REFERENCE_FRAME.WORLD).
+    p_cam = R^T (p_world - t)
+    """
+    R = np.array(cam_pose.get_rotation_matrix().r, dtype=float)
+    t = np.array(cam_pose.get_translation().get(), dtype=float)
+    p = np.asarray(xyz_w, dtype=float).reshape(3)
+    return R.T @ (p - t)
+
+
+def zed_world_vel_to_camera(vel_w, cam_pose):
+    """Rotate velocity only (no translation)."""
+    R = np.array(cam_pose.get_rotation_matrix().r, dtype=float)
+    v = np.asarray(vel_w, dtype=float).reshape(3)
+    return R.T @ v
+
+
+def cam_to_ekf_xy(xyz_cam):
+    """ZED cam (X right, Y down, Z forward) → EKF (px forward, py cam-right)."""
+    return float(xyz_cam[2]), float(xyz_cam[0])
+
+
+def apply_cam_mount_ekf(px, py):
+    """
+    Optional fixed mount: CAM_TO_BASE is ROS base_link offset of camera.
+    EKF py = cam-right = -ROS_y, so base_y offset contributes as -CAM_TO_BASE_Y.
+    """
+    return px + float(CAM_TO_BASE_X), py - float(CAM_TO_BASE_Y)
 
 
 def get_velocity_heading(velocity):
@@ -411,14 +455,21 @@ def main():
     image_zed = sl.Mat()
 
     body_runtime_param = sl.BodyTrackingRuntimeParameters()
-    body_runtime_param.detection_confidence_threshold = 40
+    body_runtime_param.detection_confidence_threshold = int(BODY_MIN_CONF)
 
     # EKF variables
     ekf = None
     previous_timestamp = None
     filter_t0 = None  # first EKF timestamp; used with EVAL_SKIP_S
-    seconds_ahead = 1.0
-    rviz_ahead = 2.0
+    seconds_ahead = 1.0  # paper / CSV ADE horizon (do not change for Block 1)
+    rviz_ahead = float(RVIZ_PRED_HORIZON)
+    nav_ahead = float(NAV_PRED_HORIZON)
+    print(
+        f"[PRED] eval={seconds_ahead:.1f}s | nav_cloud={nav_ahead:.1f}s | "
+        f"rviz_arrow={rviz_ahead:.1f}s"
+    )
+    locked_body_id = None
+    last_seen_body_t = None
 
     # Evaluation variables
     prediction_buffer = []
@@ -433,9 +484,13 @@ def main():
     # UI variables
     trajectory_points = []
     max_trajectory_len = 25
+    runtime = sl.RuntimeParameters()
+    # Body/depth in CAMERA frame → already robot-relative when ZED is on the robot.
+    # Do NOT treat as WORLD (would double-transform and skew the Nav2 blob).
+    runtime.measure3D_reference_frame = sl.REFERENCE_FRAME.CAMERA
 
     while True:
-        grab_status = zed.grab()
+        grab_status = zed.grab(runtime)
         if grab_status == sl.ERROR_CODE.END_OF_SVOFILE_REACHED:
             print("[SVO] End of file reached. Exiting.")
             break
@@ -455,43 +510,86 @@ def main():
 
             if bodies.is_new:
                 body_array = bodies.body_list
+                current_timestamp = zed.get_timestamp(
+                    sl.TIME_REFERENCE.IMAGE
+                ).get_milliseconds() / 1000.0
 
+                # Drop lock if person missing too long
+                if (
+                    locked_body_id is not None
+                    and last_seen_body_t is not None
+                    and (current_timestamp - last_seen_body_t) > TRACK_LOST_S
+                ):
+                    print(f"[TRACK] lost id={locked_body_id} — reset EKF")
+                    locked_body_id = None
+                    ekf = None
+                    filter_t0 = None
+                    previous_timestamp = None
+                    prediction_buffer = []
+                    if danger_zone is not None:
+                        danger_zone.reset_smooth()
+
+                tracked = None
                 if len(body_array) > 0:
-                    first_body = body_array[0]
+                    candidates = []
+                    for b in body_array:
+                        conf = float(getattr(b, "confidence", 0.0))
+                        st = getattr(b, "tracking_state", None)
+                        ok = (
+                            st is None
+                            or st == sl.OBJECT_TRACKING_STATE.OK
+                        )
+                        if conf >= BODY_MIN_CONF and ok:
+                            candidates.append(b)
+                    if locked_body_id is not None:
+                        for b in candidates:
+                            if int(b.id) == int(locked_body_id):
+                                tracked = b
+                                break
+                    if tracked is None and candidates:
+                        tracked = candidates[0]
+                        new_id = int(tracked.id)
+                        if locked_body_id is not None and new_id != locked_body_id:
+                            print(
+                                f"[TRACK] switch {locked_body_id} → {new_id} — reset EKF"
+                            )
+                            ekf = None
+                            filter_t0 = None
+                            previous_timestamp = None
+                            prediction_buffer = []
+                            if danger_zone is not None:
+                                danger_zone.reset_smooth()
+                        locked_body_id = new_id
 
-                    position = first_body.position
-                    velocity = first_body.velocity
-                    dimensions = first_body.dimensions
+                if tracked is not None:
+                    last_seen_body_t = current_timestamp
+                    first_body = tracked
+
+                    # CAMERA-frame measurements (see runtime.measure3D_reference_frame)
+                    position = np.asarray(first_body.position, dtype=float)
+                    velocity = np.asarray(first_body.velocity, dtype=float)
                     keypoint = first_body.keypoint
+                    dimensions = first_body.dimensions
 
                     print(str(len(body_array)) + " Person(s) detected\n")
-
                     print("First Person attributes:")
                     print(" Confidence (" + str(int(first_body.confidence)) + "/100)")
-
                     if body_params.enable_tracking:
                         print(
                             " Tracking ID: " + str(int(first_body.id)) +
                             " tracking state: " + repr(first_body.tracking_state) +
                             " / " + repr(first_body.action_state)
                         )
-
                     print(
-                        " 3D position: [{0},{1},{2}]\n Velocity: [{3},{4},{5}]\n 3D dimensions: [{6},{7},{8}]".format(
-                            position[0],
-                            position[1],
-                            position[2],
-                            velocity[0],
-                            velocity[1],
-                            velocity[2],
-                            dimensions[0],
-                            dimensions[1],
-                            dimensions[2]
+                        " 3D position (cam): [{0},{1},{2}]\n Velocity: [{3},{4},{5}]\n 3D dimensions: [{6},{7},{8}]".format(
+                            position[0], position[1], position[2],
+                            velocity[0], velocity[1], velocity[2],
+                            dimensions[0], dimensions[1], dimensions[2]
                         )
                     )
 
                     # -----------------------------
-                    # EKF measurement
+                    # EKF measurement (camera horizontal)
                     # -----------------------------
 
                     if MOTION_MODEL == "hip_gait":
@@ -499,17 +597,16 @@ def main():
                             keypoint, position
                         )
                     else:
-                        measured_px = position[2]   # forward/backward
-                        measured_py = position[0]   # left/right
+                        measured_px, measured_py = cam_to_ekf_xy(position)
+
+                    measured_px, measured_py = apply_cam_mount_ekf(
+                        measured_px, measured_py
+                    )
 
                     measured_heading = get_hip_heading_body18(
                         keypoint,
                         velocity
                     )
-
-                    current_timestamp = zed.get_timestamp(
-                        sl.TIME_REFERENCE.IMAGE
-                    ).get_milliseconds() / 1000.0
 
                     if previous_timestamp is None:
                         dt = 0.033
@@ -561,12 +658,14 @@ def main():
 
                         future_px, future_py = ekf.predictFuture(seconds_ahead)
                         rviz_px, rviz_py = ekf.predictFuture(rviz_ahead)
+                        nav_px, nav_py = ekf.predictFuture(nav_ahead)
 
-                        # Live RViz + Nav2 cloud: now, +2s arrow, +1s costmap
+                        # Live RViz + Nav2 (standstill → now-only inside publisher)
                         if danger_zone is not None:
                             try:
                                 danger_zone.publish(
-                                    px, py, rviz_px, rviz_py, future_px, future_py
+                                    px, py, rviz_px, rviz_py, nav_px, nav_py,
+                                    speed=speed,
                                 )
                             except Exception as e:
                                 print(f"[RViz] publish failed: {e}")
@@ -628,12 +727,6 @@ def main():
                                     )
 
                                     csv_file.flush()
-
-                                    ade = np.mean(prediction_errors)
-
-                                    print(f"prediction error = {error:.3f} m")
-                                    print(f"ADE so far = {ade:.3f} m")
-
                                     logged_this_frame = True
                             else:
                                 remaining_predictions.append(pred)

@@ -1,0 +1,42 @@
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=58.50
+distance_m=5.03
+person_frames=147
+min_robot_to_person_m=0.837
+max_cloud_extent_m=0.220
+max_plan_length_m=5.250
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=OK_or_unclear — compare A vs B on min_clear + progress_fails + duration
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_174345.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=56.50
+distance_m=5.10
+person_frames=328
+min_robot_to_person_m=0.837
+max_cloud_extent_m=0.220
+max_plan_length_m=5.347
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=OK_or_unclear — compare A vs B on min_clear + progress_fails + duration
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_174345.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=101.30
+distance_m=8.39
+person_frames=415
+min_robot_to_person_m=0.764
+max_cloud_extent_m=0.605
+max_plan_length_m=6.344
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.4
+verdict=OK_or_unclear — compare A vs B on min_clear + progress_fails + duration
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_174345.csv

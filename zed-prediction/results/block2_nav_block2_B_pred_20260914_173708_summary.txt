@@ -1,0 +1,14 @@
+
+===== SEGMENT =====
+TEST=block2_B_pred  MODE=pred
+duration_s=181.40
+distance_m=16.06
+person_frames=1033
+min_robot_to_person_m=0.306
+max_cloud_extent_m=0.855
+max_plan_length_m=7.204
+progress_fail_count=0
+pred_wrong_side_pct≈79.5
+cloud_enlarged_pct≈1.5
+verdict=SUSPECT: cloud_very_large=0.85m; pred_wrong_side=79%
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_B_pred_20260914_173708.csv

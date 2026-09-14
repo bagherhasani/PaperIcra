@@ -28,7 +28,7 @@ import math
 import struct
 import time
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path as FsPath
 
 import rclpy
 from rclpy.node import Node
@@ -45,7 +45,7 @@ except ImportError:
     TEST_NAME = "block2_unknown"
     NAV_CLOUD_MODE = "?"
 
-RESULTS = Path(__file__).resolve().parent / "results"
+RESULTS = FsPath(__file__).resolve().parent / "results"
 RESULTS.mkdir(parents=True, exist_ok=True)
 
 # Start logging when |v| or |w| exceeds this; stop segment after idle this long

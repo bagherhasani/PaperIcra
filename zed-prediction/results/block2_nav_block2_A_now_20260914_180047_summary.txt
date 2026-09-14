@@ -1,0 +1,252 @@
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=11.40
+distance_m=0.65
+person_frames=0
+min_robot_to_person_m=1.275
+max_cloud_extent_m=0.220
+max_plan_length_m=0.595
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=SUSPECT: no_person_while_moving
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=5.00
+distance_m=0.02
+person_frames=0
+min_robot_to_person_m=5.332
+max_cloud_extent_m=0.220
+max_plan_length_m=4.138
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=SUSPECT: no_person_while_moving
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=18.40
+distance_m=2.49
+person_frames=139
+min_robot_to_person_m=2.970
+max_cloud_extent_m=0.220
+max_plan_length_m=2.656
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=OK_or_unclear — compare A vs B on min_clear + progress_fails + duration
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=36.30
+distance_m=4.06
+person_frames=77
+min_robot_to_person_m=3.226
+max_cloud_extent_m=0.220
+max_plan_length_m=3.102
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=OK_or_unclear — compare A vs B on min_clear + progress_fails + duration
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=33.30
+distance_m=4.93
+person_frames=0
+min_robot_to_person_m=4.645
+max_cloud_extent_m=0.220
+max_plan_length_m=4.835
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=SUSPECT: no_person_while_moving
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=78.00
+distance_m=8.43
+person_frames=187
+min_robot_to_person_m=0.171
+max_cloud_extent_m=0.220
+max_plan_length_m=10.821
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=OK_or_unclear — compare A vs B on min_clear + progress_fails + duration
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=53.00
+distance_m=3.72
+person_frames=0
+min_robot_to_person_m=1.068
+max_cloud_extent_m=0.220
+max_plan_length_m=11.322
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=SUSPECT: no_person_while_moving
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=25.10
+distance_m=0.74
+person_frames=24
+min_robot_to_person_m=0.961
+max_cloud_extent_m=0.220
+max_plan_length_m=10.173
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=OK_or_unclear — compare A vs B on min_clear + progress_fails + duration
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=29.60
+distance_m=1.39
+person_frames=22
+min_robot_to_person_m=0.846
+max_cloud_extent_m=0.220
+max_plan_length_m=1.187
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=OK_or_unclear — compare A vs B on min_clear + progress_fails + duration
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=17.00
+distance_m=2.13
+person_frames=0
+min_robot_to_person_m=0.846
+max_cloud_extent_m=0.220
+max_plan_length_m=2.312
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=SUSPECT: no_person_while_moving
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=24.60
+distance_m=3.20
+person_frames=65
+min_robot_to_person_m=0.693
+max_cloud_extent_m=0.354
+max_plan_length_m=5.216
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=OK_or_unclear — compare A vs B on min_clear + progress_fails + duration
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=22.60
+distance_m=0.33
+person_frames=0
+min_robot_to_person_m=0.693
+max_cloud_extent_m=0.227
+max_plan_length_m=6.360
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=SUSPECT: no_person_while_moving
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=2.90
+distance_m=0.00
+person_frames=0
+min_robot_to_person_m=0.693
+max_cloud_extent_m=0.227
+max_plan_length_m=6.274
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=SUSPECT: no_person_while_moving
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=2.80
+distance_m=0.00
+person_frames=0
+min_robot_to_person_m=0.693
+max_cloud_extent_m=0.227
+max_plan_length_m=6.293
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=SUSPECT: no_person_while_moving
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=2.60
+distance_m=0.00
+person_frames=0
+min_robot_to_person_m=0.693
+max_cloud_extent_m=0.227
+max_plan_length_m=6.230
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=SUSPECT: no_person_while_moving
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=48.50
+distance_m=6.87
+person_frames=180
+min_robot_to_person_m=0.693
+max_cloud_extent_m=0.337
+max_plan_length_m=6.255
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=OK_or_unclear — compare A vs B on min_clear + progress_fails + duration
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=68.20
+distance_m=6.77
+person_frames=258
+min_robot_to_person_m=0.701
+max_cloud_extent_m=1.498
+max_plan_length_m=6.736
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈4.8
+verdict=SUSPECT: cloud_very_large=1.50m
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
+
+===== SEGMENT =====
+TEST=block2_A_now  MODE=now
+duration_s=2.60
+distance_m=0.00
+person_frames=0
+min_robot_to_person_m=1.027
+max_cloud_extent_m=0.252
+max_plan_length_m=0.812
+progress_fail_count=0
+pred_wrong_side_pct≈0.0
+cloud_enlarged_pct≈0.0
+verdict=SUSPECT: no_person_while_moving
+csv=/home/user/ros2_ws/src/zed-detection/zed-prediction/results/block2_nav_block2_A_now_20260914_180047.csv
