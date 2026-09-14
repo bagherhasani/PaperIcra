@@ -10,6 +10,9 @@ PROFIDEA3_K = 0.35
 # Live camera (empty = real ZED, not SVO)
 SVO_PATH = ""
 
+# False = hold robot still (zero /cmd_vel). True = allow Nav2 to drive.
+ROBOT_MOVE = False
+
 # ── Paper 1s SVO runs (comment live above, uncomment one below) ───────────────
 # TEST_NAME = "ctrv_Dwalk_1s"
 # TEST_NAME = "hip_Dwalk_1s"
