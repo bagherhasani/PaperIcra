@@ -1,0 +1,78 @@
+\begin{thebibliography}{10}
+\providecommand{\url}[1]{#1}
+\csname url@rmstyle\endcsname
+\providecommand{\newblock}{\relax}
+\providecommand{\bibinfo}[2]{#2}
+\providecommand\BIBentrySTDinterwordspacing{\spaceskip=0pt\relax}
+\providecommand\BIBentryALTinterwordstretchfactor{4}
+\providecommand\BIBentryALTinterwordspacing{\spaceskip=\fontdimen2\font plus
+\BIBentryALTinterwordstretchfactor\fontdimen3\font minus
+  \fontdimen4\font\relax}
+\providecommand\BIBforeignlanguage[2]{{%
+\expandafter\ifx\csname l@#1\endcsname\relax
+\typeout{** WARNING: IEEEtran.bst: No hyphenation pattern has been}%
+\typeout{** loaded for the language `#1'. Using the pattern for}%
+\typeout{** the default language instead.}%
+\else
+\language=\csname l@#1\endcsname
+\fi
+#2}}
+
+\bibitem{trautman2010unfreezing}
+P.~Trautman and A.~Krause, ``Unfreezing the robot: Navigation in dense,
+  interacting crowds,'' in \emph{Proc. {IEEE/RSJ} Int. Conf. Intell. Robots
+  Syst. ({IROS})}, 2010.
+
+\bibitem{sathyamoorthy2020frozone}
+A.~J. Sathyamoorthy, U.~Patel, T.~Guan, and D.~Manocha, ``{Frozone}:
+  Freezing-free, pedestrian-friendly navigation in human crowds,'' \emph{{IEEE}
+  Robot. Autom. Lett.}, 2020.
+
+\bibitem{unhelkar2015anticipatory}
+V.~V. Unhelkar, C.~P{\'e}rez-D'Arpino, L.~Stirling, and J.~A. Shah,
+  ``Human-robot co-navigation using anticipatory indicators of human walking
+  motion,'' in \emph{Proc. {IEEE} Int. Conf. Robot. Autom. ({ICRA})}, 2015.
+
+\bibitem{quintero2018path}
+R.~Quintero, I.~Parra, D.~F. Llorca, and M.~A. Sotelo, ``Pedestrian path, pose,
+  and intention prediction through {Gaussian} process dynamical models and
+  pedestrian activity recognition,'' \emph{{IEEE} Trans. Intell. Transp.
+  Syst.}, 2018.
+
+\bibitem{salzmann2023robots}
+T.~Salzmann, H.-T.~L. Chiang, M.~Ryll, D.~Sadigh, C.~Parada, and A.~Bewley,
+  ``Robots that can see: Leveraging human pose for trajectory prediction,''
+  \emph{{IEEE} Robot. Autom. Lett.}, 2023.
+
+\bibitem{schoeller2020constant}
+C.~Sch{\"o}ller, V.~Aravantinos, F.~Lay, and A.~Knoll, ``What the constant
+  velocity model can teach us about pedestrian motion prediction,''
+  \emph{{IEEE} Robot. Autom. Lett.}, 2020.
+
+\bibitem{lu2014layered}
+D.~V. Lu, D.~Hershberger, and W.~D. Smart, ``Layered costmaps for
+  context-sensitive navigation,'' in \emph{Proc. {IEEE/RSJ} Int. Conf. Intell.
+  Robots Syst. ({IROS})}, 2014.
+
+\bibitem{katyal2020intent}
+K.~D. Katyal, G.~D. Hager, and C.-M. Huang, ``Intent-aware pedestrian
+  prediction for adaptive crowd navigation,'' in \emph{Proc. {IEEE} Int. Conf.
+  Robot. Autom. ({ICRA})}, 2020.
+
+\bibitem{sun2018threedof}
+L.~Sun, Z.~Yan, S.~M. Mellado, M.~Hanheide, and T.~Duckett, ``3{DOF} pedestrian
+  trajectory prediction learned from long-term autonomous mobile robot
+  deployment data,'' in \emph{Proc. {IEEE} Int. Conf. Robot. Autom. ({ICRA})},
+  2018.
+
+\bibitem{gonzalez2022gait}
+L.~Gonz{\'a}lez, A.~M. L{\'o}pez, J.~C. {\'A}lvarez, and D.~{\'A}lvarez,
+  ``Real-time short-term pedestrian trajectory prediction based on gait
+  biomechanics,'' \emph{Sensors}, vol.~22, 2022.
+
+\bibitem{uptor2025}
+N.~Nilavadi, A.~Rudenko, and T.~Linder, ``{UPTor}: Unified 3{D} human pose
+  dynamics and trajectory prediction for human-robot interaction,'' in
+  \emph{Proc. {IEEE} Int. Conf. Robot. Autom. ({ICRA})}, 2025.
+
+\end{thebibliography}

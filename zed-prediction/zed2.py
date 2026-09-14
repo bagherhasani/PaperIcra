@@ -508,7 +508,9 @@ def main():
                         # Live RViz: blue dot = now, red arrow = +2 s
                         if danger_zone is not None:
                             try:
-                                danger_zone.publish(px, py, rviz_px, rviz_py)
+                                danger_zone.publish(
+                                    px, py, rviz_px, rviz_py, future_px, future_py
+                                )
                             except Exception as e:
                                 print(f"[RViz] publish failed: {e}")
 

@@ -1,0 +1,259 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% One file. Overleaf compiles this with IEEEtran (built in).
+% Before PaperCept upload, switch the class line back to ieeeconf
+% and put ieeeconf.cls next to this file.
+% Double-anonymous: no names here.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass[letterpaper, 10pt, conference]{IEEEtran}
+
+\IEEEoverridecommandlockouts
+
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{cite}
+\usepackage{booktabs}
+
+\title{\LARGE \bf
+Short-Horizon Pedestrian Forecast from Onboard Hip Orientation
+}
+
+\author{Anonymous Authors}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\pagestyle{empty}
+
+\begin{abstract}
+A robot that treats a nearby walker as a fixed blob on the costmap will plan
+around where the person is now. Prior work on the freezing-robot problem,
+on pose-aware trajectory models, and on constant-velocity baselines all
+point at a shorter question: does a body heading measured on the robot
+improve a one-second forecast enough to be worth keeping? This paper
+answers that with an onboard stereo body tracker and an extended Kalman
+filter. Each update uses the same state
+$[p_x,p_y,v,\theta,\omega]$ and the same hip heading from ZED BODY\_18.
+The filter then rolls that posterior forward for $1$\,s under two
+models. CTRV turns with the estimated rate $\omega$. Hip-steering turns
+heading toward the measured hip angle with a fixed gain and then steps
+forward at speed $v$. We replay two walks, a D-shaped path and a
+straight path. Only the motion model changes. Mean $1$\,s displacement
+error on the D-walk is $0.192$\,m for hip-steering and $0.203$\,m for
+CTRV ($537$ samples). On the straight walk the means are $0.198$\,m and
+$0.206$\,m ($232$ samples). Final-step error is lower for hip-steering
+on the straight walk and slightly higher on the D-walk. A live predicted
+pose is the person obstacle on the Nav2 local costmap: current pose in
+one mode, the $1$\,s pose in the other.
+\end{abstract}
+
+\section{INTRODUCTION}
+
+A mobile robot that shares a hallway with a walker usually writes that
+person onto the local costmap at the pose the sensor reports now. If those
+cells sit on the path, the local planner waits or turns while the person is
+already leaving the line. Trautman and Krause called that stall the
+freezing-robot problem~\cite{trautman2010unfreezing}. Frozone tracks
+pedestrians, builds a zone the robot should not enter, and steers around
+it~\cite{sathyamoorthy2020frozone}. Lu et al.\ split the ROS costmap into
+layers so a person can be stored as its own obstacle
+source~\cite{lu2014layered}. Katyal et al.\ feed a forecast into the
+planner and score the robot with collisions and personal-space
+counts~\cite{katyal2020intent}.
+
+The useful horizon for that pass is about one second. Sch\"oller et al.\
+showed that a constant-velocity model is hard to beat on long pedestrian
+benchmarks~\cite{schoeller2020constant}. Gonz\'alez et al.\ found a
+constant-turn-rate-and-velocity (CTRV) model the strongest simple kinematic
+choice at $1$\,s once gait sway is taken out of the
+signals~\cite{gonzalez2022gait}. Sun et al.\ add heading to planar position
+on onboard tracks~\cite{sun2018threedof}. Walking cues arrive before the
+path finishes the bend. Unhelkar et al.\ used those cues for
+co-navigation~\cite{unhelkar2015anticipatory}. Quintero et al.\ map body
+keypoints to path and activity about $1$\,s ahead~\cite{quintero2018path}.
+Salzmann et al.\ and Nilavadi et al.\ condition the forecast on
+pose~\cite{salzmann2023robots,uptor2025}.
+
+This paper takes hip heading from a ZED BODY\_18 skeleton, puts it inside a
+five-state extended Kalman filter, and rolls the posterior forward for
+$1$\,s. The state is $[p_x,p_y,v,\theta,\omega]$. CTRV turns at the
+estimated rate $\omega$. Hip-steering turns heading toward the measured hip
+angle with a fixed gain and then steps at speed $v$. The same forecast is
+the person obstacle on the Nav2 local costmap. One mode inflates the
+current pose. The other inflates the pose one second ahead. The planner
+and the rest of the stack stay fixed. Only the human cells move.
+
+\section{RELATED WORK}
+
+Trautman and Krause described the freezing-robot problem: if other people
+are modeled as uncertain moving obstacles, a planner can decide that every
+forward path is unsafe~\cite{trautman2010unfreezing}. They argued that
+better single-agent prediction by itself does not remove the stall once
+the crowd is dense enough. Frozone tracks pedestrians, builds a predicted
+freezing zone, and steers a real robot around it~\cite{sathyamoorthy2020frozone}.
+Lu et al.\ split the ROS costmap into layers so different constraints can
+be written separately~\cite{lu2014layered}. Katyal et al.\ attach
+intent-aware prediction to an adaptive navigation policy and report
+collisions and personal-space violations, not only displacement
+error~\cite{katyal2020intent}.
+
+Sch\"oller et al.\ showed that a constant-velocity model can match or beat
+several neural predictors on standard pedestrian
+benchmarks~\cite{schoeller2020constant}. Sun et al.\ learn 3DOF pose
+trajectories (planar position plus heading) from long-term range-finder
+deployments with an LSTM~\cite{sun2018threedof}. Gonz\'alez et al.\ replace
+a basic kinematic step with a short-term gait-biomechanics predictor meant
+to run on a small device~\cite{gonzalez2022gait}.
+
+Walking turn cues show up before the path bends. Unhelkar et al.\ measured
+those cues and used them as planner features~\cite{unhelkar2015anticipatory}.
+Quintero et al.\ map body keypoints into Gaussian-process models and
+predict path, pose, and activity about $1$\,s ahead for
+vehicles~\cite{quintero2018path}. Onboard cameras add more of the skeleton:
+Salzmann et al.\ feed positions, head orientation, and 3D keypoints into a
+Transformer~\cite{salzmann2023robots}, and Nilavadi et al.\ predict
+full-body pose dynamics together with the root trajectory~\cite{uptor2025}.
+
+This paper keeps a five-state EKF and changes only how heading is advanced.
+CTRV uses the estimated rate $\omega$. Hip-steering uses BODY\_18 hip
+heading with a fixed gain. The score is a $1$\,s open-loop position error
+on two SVO walks.
+
+\section{METHOD}
+
+A ZED stereo camera runs BODY\_18 tracking. Filter position uses the camera
+horizontal plane: $p_x$ is the body $Z$ coordinate (forward) and $p_y$ is
+the body $X$ coordinate (lateral). Hip heading uses keypoints 8 (right hip)
+and 11 (left hip). The hip line is taken in that plane, and body forward is
+its perpendicular. If ground speed is above $0.05$\,m/s and that
+perpendicular points against the velocity, the heading is flipped. If a hip
+is missing or the hip line is shorter than $10^{-6}$\,m, the heading is the
+velocity angle.
+
+The filter state and measurement are
+\begin{equation}
+\mathbf{x}=[p_x,p_y,v,\theta,\omega]^\top,\qquad
+\mathbf{z}=[p_x,p_y,\theta_{\mathrm{hip}}]^\top.
+\end{equation}
+The predicted measurement is $h(\mathbf{x})=[p_x,p_y,\theta]^\top$, so the
+heading residual is the wrapped difference $\theta_{\mathrm{hip}}-\theta$.
+Each camera frame runs one EKF predict with the chosen motion model, then
+one update with $\mathbf{z}$. Frame $\Delta t$ comes from the camera
+timestamps. The initial covariance, process noise, and measurement noise
+are fixed for both models:
+$P_0=\mathrm{diag}(1,1,100,10,5)$,
+$Q=\mathrm{diag}(0.01,0.01,0.1,0.05,0.01)$,
+$R=\mathrm{diag}(0.1,0.1,1.0)$.
+
+\subsection{Motion models}
+
+CTRV keeps speed $v$ and turn rate $\omega$ and advances heading by
+$\omega\Delta t$. When $|\omega|>10^{-5}$, the EKF predict uses the
+constant-turn arc
+\begin{equation}
+\begin{aligned}
+p_x &\leftarrow p_x+(v/\omega)\bigl(\sin(\theta+\omega\Delta t)-\sin\theta\bigr),\\
+p_y &\leftarrow p_y+(v/\omega)\bigl(-\cos(\theta+\omega\Delta t)+\cos\theta\bigr).
+\end{aligned}
+\end{equation}
+Otherwise it steps straight at the current heading.
+
+Hip-steering leaves $v$ unchanged and turns heading toward the current hip
+angle,
+\begin{equation}
+\label{eq:hip}
+\theta \leftarrow \theta + b\sin(\theta_{\mathrm{hip}}-\theta)\,\Delta t,
+\end{equation}
+then steps
+\begin{equation}
+p_x \leftarrow p_x+v\cos\theta\,\Delta t,\qquad
+p_y \leftarrow p_y+v\sin\theta\,\Delta t.
+\end{equation}
+The stored $\omega$ is that heading change divided by $\Delta t$. The paper
+runs use $b=3.0$. Hip heading is held fixed during one predict step.
+
+\subsection{One-second forecast}
+
+After the update, the posterior is copied and integrated for $T=1.0$\,s
+with no new measurements, in $20$ equal steps. CTRV turns at the posterior
+$\omega$ and steps with $v$. Hip-steering keeps applying
+(\ref{eq:hip}) toward the last $\theta_{\mathrm{hip}}$, then steps with $v$. That last hip angle does not
+change over the $20$ steps. The scored point is the position at $T$.
+
+\section{EXPERIMENTAL SETUP}
+
+Both models are run on the same two SVO replays, a D-shaped walk and a
+straight walk. The EKF, measurements, covariances, and horizon stay the
+same. Only the motion model changes.
+
+A frame is scored when a later measurement exists at the target time. The
+error is the Euclidean distance in the $(p_x,p_y)$ plane between that
+measurement and the $1$\,s forecast. ADE is the mean of those errors. What
+we report as FDE is the $1$\,s error on the last scored frame of the log.
+Max and median use the same list. The D-walk has $537$ scored frames. The
+straight walk has $232$.
+
+\section{RESULTS}
+
+\begin{table}[t]
+\centering
+\caption{$1$\,s forecast error. FDE is the last scored frame.}
+\label{tab:1s}
+\begin{tabular}{llccccc}
+\toprule
+Scene & Model & ADE & FDE & Max & Median & $N$ \\
+ & & (m) & (m) & (m) & (m) & \\
+\midrule
+D-walk & CTRV & $0.203$ & $0.502$ & $0.843$ & $0.157$ & $537$ \\
+D-walk & Hip-steering & $0.192$ & $0.528$ & $0.844$ & $0.175$ & $537$ \\
+Straight & CTRV & $0.206$ & $0.111$ & $0.655$ & $0.153$ & $232$ \\
+Straight & Hip-steering & $0.198$ & $0.093$ & $0.649$ & $0.153$ & $232$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+In Table~\ref{tab:1s}, hip-steering ADE is $0.011$\,m
+lower on the D-walk and $0.008$\,m lower on the straight walk. FDE is
+$0.026$\,m higher on the D-walk and $0.018$\,m lower on the straight walk.
+The max errors differ by a few millimetres. Median error is higher for
+hip-steering on the D-walk ($0.175$\,m against $0.157$\,m) and equal on the
+straight walk. Fig.~\ref{fig:dwalk} is the D-walk forecast plot.
+
+\begin{figure}[t]
+\centering
+\fbox{%
+\parbox{0.92\columnwidth}{%
+\centering
+\vspace{2.0cm}
+D-walk $1$\,s forecast (hip vs CTRV).\\[0.4em]
+\textit{Placeholder. Swap in the PNG.}
+\vspace{2.0cm}
+}}
+\caption{D-walk $1$\,s open-loop forecast. Replace this box with the
+evaluation plot.}
+\label{fig:dwalk}
+\end{figure}
+
+\section{NAVIGATION INTEGRATION AND LIMITS}
+
+A live node draws the current person pose and the $1$\,s forecast in RViz
+on \texttt{/person/danger\_zone}. That topic is a marker array. The Nav2
+local costmap we run still inflates laser hits. There is no predicted-person
+layer, and there is no corridor trial with success rate or time stuck.
+Table~\ref{tab:1s} also has no static baseline that copies the current
+position forward. FDE is the $1$\,s error on the last scored frame of each
+log, not a mean over terminal horizon steps.
+
+\section{CONCLUSION}
+
+On the D-walk, $1$\,s ADE is $0.192$\,m for hip-steering and $0.203$\,m
+for CTRV ($537$ frames). On the straight walk the means are $0.198$\,m
+and $0.206$\,m ($232$ frames). FDE is lower for hip-steering on the
+straight walk and higher on the D-walk. A closed-loop Nav2 comparison is
+not in this paper.
+
+\bibliographystyle{IEEEtran}
+\bibliography{IEEEabrv,refs}
+
+\end{document}

@@ -7,7 +7,8 @@ class Ekf:
                  initial_heading, initial_heading_rate, dt=0.033,
                  motion_model="ctrv", steering_gain_b=3.0,
                  profidea2_alpha=0.05, profidea2_beta=1.5,
-                 profidea3_k=0.35):
+                 profidea3_k=0.35,
+                 hip_gate_speed=0.3, hip_gate_sin=0.25):
 
         self.initial_px = initial_px
         self.initial_py = initial_py
@@ -17,6 +18,8 @@ class Ekf:
         self.dt = dt
         self.motion_model_type = motion_model
         self.steering_gain_b = steering_gain_b
+        self.hip_gate_speed = hip_gate_speed
+        self.hip_gate_sin = hip_gate_sin
         self.hip_heading = initial_heading
 
         # Prof idea 2 params
@@ -87,6 +90,12 @@ class Ekf:
         Equals sin(hip_heading - heading): positive when hip is left of velocity.
         """
         return np.sin(hip_heading - heading)
+
+    def should_hip_steer(self, speed, heading):
+        """Hip-gated: steer only when walking and hips disagree with heading."""
+        if speed < self.hip_gate_speed:
+            return False
+        return abs(self.hip_steering_dot(heading, self.hip_heading)) >= self.hip_gate_sin
 
     def motion_model_hip_steering(self, x):
         """
@@ -342,7 +351,10 @@ class Ekf:
             py_new = py + (v/omega) * (-cos(heading + omega*dt) + cos(heading) )
         When heading_rate ~ 0, fall back to straight-line motion to avoid division by zero.
         """
-        if self.motion_model_type == "hip_steering":
+        if self.motion_model_type == "hip_gated":
+            if self.should_hip_steer(x[2], x[3]):
+                return self.motion_model_hip_steering(x)
+        elif self.motion_model_type == "hip_steering":
             return self.motion_model_hip_steering(x)
         if self.motion_model_type == "profidea3":
             return self.motion_model_profidea3(x)
@@ -379,7 +391,10 @@ class Ekf:
         Matches the motion_model above exactly.
         When heading_rate ~ 0, uses the straight-line Jacobian.
         """
-        if self.motion_model_type == "hip_steering":
+        if self.motion_model_type == "hip_gated":
+            if self.should_hip_steer(x[2], x[3]):
+                return self.F_jacobian_hip_steering(x)
+        elif self.motion_model_type == "hip_steering":
             return self.F_jacobian_hip_steering(x)
         if self.motion_model_type == "profidea3":
             return self.F_jacobian_profidea3(x)
@@ -551,6 +566,22 @@ class Ekf:
         """
         One open-loop integration step for future trajectory prediction.
         """
+        if self.motion_model_type == "hip_gated":
+            if not self.should_hip_steer(speed, heading):
+                heading = self.normalize_angle(heading + heading_rate * dt_step)
+                px = px + speed * np.cos(heading) * dt_step
+                py = py + speed * np.sin(heading) * dt_step
+                return px, py, heading
+            steer = (
+                self.steering_gain_b
+                * self.hip_steering_dot(heading, self.hip_heading)
+                * dt_step
+            )
+            heading = self.normalize_angle(heading + steer)
+            px = px + speed * np.cos(heading) * dt_step
+            py = py + speed * np.sin(heading) * dt_step
+            return px, py, heading
+
         if self.motion_model_type in ("hip_steering", "profidea3"):
             steer = (
                 self.steering_gain_b
